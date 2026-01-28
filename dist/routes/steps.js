@@ -43,9 +43,10 @@ router.get('/date/:date', authenticate, async (req, res) => {
         const { date } = req.params;
         const userId = req.userId;
         const steps = await getStepsByDate(userId, date);
+        const stepCount = steps?.stepCount ?? 0;
         res.json({
             success: true,
-            data: steps,
+            stepCount,
         });
     }
     catch (error) {
@@ -95,7 +96,7 @@ router.get('/total', authenticate, async (req, res) => {
         const total = await getTotalSteps(userId, startDate || null, endDate || null);
         res.json({
             success: true,
-            data: { totalSteps: total },
+            totalSteps: total,
         });
     }
     catch (error) {
