@@ -70,3 +70,8 @@ Thumbs.db
 build/
 dist/
 *.tgz
+
+# Elastic Beanstalk Files
+.elasticbeanstalk/*
+!.elasticbeanstalk/*.cfg.yml
+!.elasticbeanstalk/*.global.yml
