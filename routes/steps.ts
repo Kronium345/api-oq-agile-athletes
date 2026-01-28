@@ -74,10 +74,11 @@ router.get('/date/:date', authenticate, async (req: AuthenticatedRequest<StepsPa
     const userId = req.userId!;
 
     const steps = await getStepsByDate(userId, date);
+    const stepCount = steps?.stepCount ?? 0;
 
     res.json({
       success: true,
-      data: steps,
+      stepCount,
     });
   } catch (error: any) {
     console.error('Get steps by date error:', error);
@@ -136,7 +137,7 @@ router.get('/total', authenticate, async (req: AuthenticatedRequest<{}, {}, {}, 
 
     res.json({
       success: true,
-      data: { totalSteps: total },
+      totalSteps: total,
     });
   } catch (error: any) {
     console.error('Get total steps error:', error);
