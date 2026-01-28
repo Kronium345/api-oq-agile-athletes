@@ -2,7 +2,7 @@ import { DeleteCommand, PutCommand } from '@aws-sdk/lib-dynamodb';
 import express from 'express';
 import { ddbDocClient } from '../config/ddbClient.js';
 import { authenticate } from '../middleware/auth.js';
-import { getExerciseHistory, recordExercise, } from '../models/exerciseHistory.js';
+import { getAllExercises, recordExercise, } from '../models/exerciseHistory.js';
 import { getFavorites, isFavorite } from '../models/favorites.js';
 const FAVORITES_TABLE = process.env.DDB_FAVORITES_TABLE || 'Favorites';
 const router = express.Router();
@@ -225,27 +225,25 @@ router.get('/favorites/:userId', authenticate, async (req, res) => {
     }
 });
 /**
- * Get exercise history within date range
  */
 router.get('/history', authenticate, async (req, res) => {
     try {
-        const { startDate, endDate } = req.query;
         const userId = req.userId;
-        if (!startDate || !endDate) {
-            return res.status(400).json({
+        if (!userId) {
+            return res.status(401).json({
                 success: false,
-                message: 'startDate and endDate query parameters are required',
+                message: 'User authentication failed',
             });
         }
-        const history = await getExerciseHistory(userId, startDate, endDate);
-        res.json({
+        const { items } = await getAllExercises(userId, 1000);
+        return res.json({
             success: true,
-            data: history,
+            data: items,
         });
     }
     catch (error) {
         console.error('Get exercise history error:', error);
-        res.status(500).json({
+        return res.status(500).json({
             success: false,
             message: 'Failed to get exercise history',
             error: error.message,
