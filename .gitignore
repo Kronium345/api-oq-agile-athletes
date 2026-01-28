@@ -68,7 +68,6 @@ Thumbs.db
 
 # Build outputs
 build/
-dist/
 *.tgz
 
 # Elastic Beanstalk Files

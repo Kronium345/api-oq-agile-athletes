@@ -4,7 +4,7 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "start": "npm run build && node dist/index.js",
+    "start": "node dist/index.js",
     "dev": "nodemon --exec \"node --import tsx\" index.ts",
     "dev:ts-node": "nodemon --exec \"npx ts-node --esm\" index.ts",
     "build": "tsc",
