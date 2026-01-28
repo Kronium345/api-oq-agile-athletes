@@ -4,6 +4,7 @@ import { ddbDocClient } from '../config/ddbClient.js';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
 import {
     getExerciseHistory,
+    getAllExercises,
     recordExercise,
 } from '../models/exerciseHistory.js';
 import {
@@ -263,29 +264,27 @@ router.get('/favorites/:userId', authenticate, async (req: AuthenticatedRequest,
 });
 
 /**
- * Get exercise history within date range
  */
 router.get('/history', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { startDate, endDate } = req.query;
     const userId = req.userId;
 
-    if (!startDate || !endDate) {
-      return res.status(400).json({
+    if (!userId) {
+      return res.status(401).json({
         success: false,
-        message: 'startDate and endDate query parameters are required',
+        message: 'User authentication failed',
       });
     }
 
-    const history = await getExerciseHistory(userId!, startDate as string, endDate as string);
+    const { items } = await getAllExercises(userId, 1000);
 
-    res.json({
+    return res.json({
       success: true,
-      data: history,
+      data: items,
     });
   } catch (error: any) {
     console.error('Get exercise history error:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'Failed to get exercise history',
       error: error.message,
