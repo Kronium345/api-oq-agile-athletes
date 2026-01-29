@@ -5,7 +5,9 @@ const router = express.Router();
 router.post('/enhance', async (req, res) => {
     console.log('🏋️ EXERCISE ENHANCEMENT REQUEST RECEIVED');
     try {
-        const { limit = 10, offset = 0 } = req.body;
+        const requestedLimit = req.body.limit || 50;
+        const limit = Math.min(Math.max(1, requestedLimit), 200);
+        const offset = req.body.offset || 0;
         const RAPID_API_KEY = process.env.RAPID_API_KEY || req.body.apiKey;
         const FITNESS_ONE_PAT = process.env.FitnessOnePAT;
         if (!RAPID_API_KEY) {
@@ -92,7 +94,13 @@ router.post('/enhance', async (req, res) => {
             success: true,
             message: `Successfully enhanced ${enhancedExercises.length} exercises`,
             exercises: enhancedExercises,
-            count: enhancedExercises.length
+            count: enhancedExercises.length,
+            pagination: {
+                limit,
+                offset,
+                hasMore: enhancedExercises.length === limit,
+                nextOffset: enhancedExercises.length === limit ? offset + limit : null
+            }
         });
     }
     catch (error) {
