@@ -24,20 +24,46 @@ router.post('/enhance', async (req, res) => {
             console.log('⚠️  Add FitnessOnePAT to server/.env to enable AI analysis');
         }
         console.log(`📡 Fetching ${limit} exercises from ExerciseDB (for metadata)...`);
-        const exerciseDBResponse = await axios.get(`https://exercisedb.p.rapidapi.com/exercises?limit=${limit}&offset=${offset}`, {
-            headers: {
-                'X-RapidAPI-Key': RAPID_API_KEY,
-                'X-RapidAPI-Host': 'exercisedb.p.rapidapi.com'
+        console.log(`🔍 ExercisesDB appears to cap at 10 exercises per request. Implementing pagination...`);
+        const EXERCISES_DB_PAGE_SIZE = 10;
+        const allExercises = [];
+        let currentOffset = offset;
+        let hasMore = true;
+        while (allExercises.length < limit && hasMore) {
+            const remainingNeeded = limit - allExercises.length;
+            const requestLimit = Math.min(EXERCISES_DB_PAGE_SIZE, remainingNeeded);
+            console.log(`📥 Fetching page: offset=${currentOffset}, limit=${requestLimit} (total collected: ${allExercises.length}/${limit})`);
+            try {
+                const exerciseDBResponse = await axios.get(`https://exercisedb.p.rapidapi.com/exercises?limit=${requestLimit}&offset=${currentOffset}`, {
+                    headers: {
+                        'X-RapidAPI-Key': RAPID_API_KEY,
+                        'X-RapidAPI-Host': 'exercisedb.p.rapidapi.com'
+                    }
+                });
+                const pageExercises = exerciseDBResponse.data || [];
+                console.log(`✅ Page fetched: ${pageExercises.length} exercises (offset=${currentOffset})`);
+                if (pageExercises.length === 0) {
+                    hasMore = false;
+                    console.log(`📭 No more exercises available (empty page at offset=${currentOffset})`);
+                }
+                else {
+                    allExercises.push(...pageExercises);
+                    currentOffset += pageExercises.length;
+                    if (pageExercises.length < requestLimit) {
+                        hasMore = false;
+                        console.log(`📭 Reached end of exercises (got ${pageExercises.length}, expected ${requestLimit})`);
+                    }
+                }
             }
-        });
-        const exercises = exerciseDBResponse.data;
-        console.log(`✅ Fetched ${exercises.length} exercises from ExerciseDB`);
-        console.log(`🔍 API URL called: https://exercisedb.p.rapidapi.com/exercises?limit=${limit}&offset=${offset}`);
-        console.log(`📊 Expected: ${limit}, Actual received: ${exercises.length}`);
-        // Check if ExercisesDB API is limiting the response
-        if (exercises.length < limit && exercises.length === 10) {
-            console.warn(`⚠️ WARNING: ExercisesDB returned exactly 10 exercises despite limit=${limit}. API may have a default limit.`);
+            catch (error) {
+                console.error(`❌ Error fetching page at offset=${currentOffset}:`, error.message);
+                hasMore = false;
+                break;
+            }
         }
+        const exercises = allExercises.slice(0, limit);
+        console.log(`✅ Total fetched: ${exercises.length} exercises from ExerciseDB (requested: ${limit})`);
+        console.log(`📊 Pagination: Made ${Math.ceil(exercises.length / EXERCISES_DB_PAGE_SIZE)} requests`);
         console.log('🖼️ Fetching images from Exercises11 and analyzing with Clarifai...');
         const enhancedExercises = await Promise.all(exercises.map(async (exercise) => {
             try {
@@ -98,6 +124,8 @@ router.post('/enhance', async (req, res) => {
             }
         }));
         console.log('📦 Sending enhanced exercises');
+        const actualFetched = exercises.length;
+        const hasMoreExercises = actualFetched === limit && hasMore;
         res.json({
             success: true,
             message: `Successfully enhanced ${enhancedExercises.length} exercises`,
@@ -106,8 +134,8 @@ router.post('/enhance', async (req, res) => {
             pagination: {
                 limit,
                 offset,
-                hasMore: enhancedExercises.length === limit,
-                nextOffset: enhancedExercises.length === limit ? offset + limit : null
+                hasMore: hasMoreExercises,
+                nextOffset: hasMoreExercises ? offset + actualFetched : null
             }
         });
     }
