@@ -7,11 +7,14 @@ const router = express.Router();
 
 router.post('/enhance', async (req: Request, res: Response) => {
   console.log('🏋️ EXERCISE ENHANCEMENT REQUEST RECEIVED');
+  console.log('📥 Request body:', JSON.stringify(req.body, null, 2));
   
   try {
     const requestedLimit = req.body.limit || 50;
     const limit = Math.min(Math.max(1, requestedLimit), 200);
     const offset = req.body.offset || 0;
+    
+    console.log(`🔢 Limit calculation: requestedLimit=${requestedLimit}, final limit=${limit}, offset=${offset}`);
     const RAPID_API_KEY = process.env.RAPID_API_KEY || req.body.apiKey;
     const FITNESS_ONE_PAT = process.env.FitnessOnePAT;
 
@@ -42,6 +45,13 @@ router.post('/enhance', async (req: Request, res: Response) => {
 
     const exercises = exerciseDBResponse.data;
     console.log(`✅ Fetched ${exercises.length} exercises from ExerciseDB`);
+    console.log(`🔍 API URL called: https://exercisedb.p.rapidapi.com/exercises?limit=${limit}&offset=${offset}`);
+    console.log(`📊 Expected: ${limit}, Actual received: ${exercises.length}`);
+    
+    // Check if ExercisesDB API is limiting the response
+    if (exercises.length < limit && exercises.length === 10) {
+      console.warn(`⚠️ WARNING: ExercisesDB returned exactly 10 exercises despite limit=${limit}. API may have a default limit.`);
+    }
 
     console.log('🖼️ Fetching images from Exercises11 and analyzing with Clarifai...');
     
