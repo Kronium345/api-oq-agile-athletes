@@ -29,6 +29,7 @@ router.post('/enhance', async (req, res) => {
         const allExercises = [];
         let currentOffset = offset;
         let hasMore = true;
+        let rateLimitError = null;
         while (allExercises.length < limit && hasMore) {
             const remainingNeeded = limit - allExercises.length;
             const requestLimit = Math.min(EXERCISES_DB_PAGE_SIZE, remainingNeeded);
@@ -58,12 +59,22 @@ router.post('/enhance', async (req, res) => {
                 if (exerciseDBResponse.status === 429) {
                     console.error(`🚫 RATE LIMIT EXCEEDED (429): Too many requests`);
                     console.error(`📄 Response data:`, JSON.stringify(exerciseDBResponse.data, null, 2));
+                    rateLimitError = {
+                        status: 429,
+                        message: 'RapidAPI rate limit exceeded. Please upgrade your plan or wait for quota reset.',
+                        data: exerciseDBResponse.data
+                    };
                     hasMore = false;
                     break;
                 }
                 if (exerciseDBResponse.status === 403) {
                     console.error(`🚫 FORBIDDEN (403): Plan limit exceeded or invalid API key`);
                     console.error(`📄 Response data:`, JSON.stringify(exerciseDBResponse.data, null, 2));
+                    rateLimitError = {
+                        status: 403,
+                        message: 'RapidAPI plan quota exhausted. Please upgrade your plan.',
+                        data: exerciseDBResponse.data
+                    };
                     hasMore = false;
                     break;
                 }
@@ -104,9 +115,19 @@ router.post('/enhance', async (req, res) => {
                     console.error(`   Response headers:`, JSON.stringify(error.response.headers, null, 2));
                     if (error.response.status === 429) {
                         console.error(`🚫 RATE LIMIT EXCEEDED: Too many requests to ExerciseDB API`);
+                        rateLimitError = {
+                            status: 429,
+                            message: 'RapidAPI rate limit exceeded. Please upgrade your plan or wait for quota reset.',
+                            data: error.response.data
+                        };
                     }
                     if (error.response.status === 403) {
                         console.error(`🚫 FORBIDDEN: Plan limit exceeded or invalid API key`);
+                        rateLimitError = {
+                            status: 403,
+                            message: 'RapidAPI plan quota exhausted. Please upgrade your plan.',
+                            data: error.response.data
+                        };
                     }
                 }
                 else if (error.request) {
@@ -119,12 +140,31 @@ router.post('/enhance', async (req, res) => {
         const exercises = allExercises.slice(0, limit);
         console.log(`✅ Total fetched: ${exercises.length} exercises from ExerciseDB (requested: ${limit})`);
         console.log(`📊 Pagination: Made ${Math.ceil(exercises.length / EXERCISES_DB_PAGE_SIZE)} requests`);
+        if (rateLimitError) {
+            console.error(`⚠️ Rate limit error detected, returning error response to client`);
+            return res.status(rateLimitError.status).json({
+                success: false,
+                message: rateLimitError.message,
+                error: 'RapidAPI quota exceeded',
+                details: rateLimitError.data,
+                exercises: [],
+                count: 0
+            });
+        }
         if (exercises.length === 0) {
             console.error(`⚠️ WARNING: No exercises fetched! This could indicate:`);
             console.error(`   1. Rate limit exceeded (429)`);
             console.error(`   2. Plan quota exhausted (403)`);
             console.error(`   3. API key invalid or missing`);
             console.error(`   4. Network/connectivity issue`);
+            // Return a more informative error if no exercises were fetched
+            return res.status(503).json({
+                success: false,
+                message: 'Unable to fetch exercises from ExerciseDB API. Please check your RapidAPI plan status.',
+                error: 'No exercises returned from API',
+                exercises: [],
+                count: 0
+            });
         }
         console.log('🖼️ Fetching images from Exercises11 and analyzing with Clarifai...');
         const enhancedExercises = await Promise.all(exercises.map(async (exercise) => {
