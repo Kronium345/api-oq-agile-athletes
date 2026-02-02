@@ -6,8 +6,8 @@ router.post('/enhance', async (req, res) => {
     console.log('🏋️ EXERCISE ENHANCEMENT REQUEST RECEIVED');
     console.log('📥 Request body:', JSON.stringify(req.body, null, 2));
     try {
-        const requestedLimit = req.body.limit || 50;
-        const limit = Math.min(Math.max(1, requestedLimit), 200);
+        const requestedLimit = req.body.limit || 100;
+        const limit = Math.min(Math.max(1, requestedLimit), 500);
         const offset = req.body.offset || 0;
         console.log(`🔢 Limit calculation: requestedLimit=${requestedLimit}, final limit=${limit}, offset=${offset}`);
         const RAPID_API_KEY = process.env.RAPID_API_KEY || req.body.apiKey;

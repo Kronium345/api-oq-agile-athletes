@@ -10,8 +10,8 @@ router.post('/enhance', async (req: Request, res: Response) => {
   console.log('📥 Request body:', JSON.stringify(req.body, null, 2));
   
   try {
-    const requestedLimit = req.body.limit || 50;
-    const limit = Math.min(Math.max(1, requestedLimit), 200);
+    const requestedLimit = req.body.limit || 100;
+    const limit = Math.min(Math.max(1, requestedLimit), 500);
     const offset = req.body.offset || 0;
     
     console.log(`🔢 Limit calculation: requestedLimit=${requestedLimit}, final limit=${limit}, offset=${offset}`);
