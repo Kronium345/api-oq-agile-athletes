@@ -46,18 +46,65 @@ router.post('/enhance', async (req: Request, res: Response) => {
       console.log(`📥 Fetching page: offset=${currentOffset}, limit=${requestLimit} (total collected: ${allExercises.length}/${limit})`);
       
       try {
+        const apiUrl = `https://exercisedb.p.rapidapi.com/exercises?limit=${requestLimit}&offset=${currentOffset}`;
+        console.log(`🌐 API Request URL: ${apiUrl}`);
+        console.log(`🔑 Using RapidAPI Key: ${RAPID_API_KEY ? RAPID_API_KEY.substring(0, 10) + '...' : 'MISSING'}`);
+        
         const exerciseDBResponse = await axios.get(
-          `https://exercisedb.p.rapidapi.com/exercises?limit=${requestLimit}&offset=${currentOffset}`,
+          apiUrl,
           {
             headers: {
               'X-RapidAPI-Key': RAPID_API_KEY,
               'X-RapidAPI-Host': 'exercisedb.p.rapidapi.com'
-            }
+            },
+            validateStatus: (status) => status < 500
           }
         );
 
+        console.log(`📊 HTTP Status: ${exerciseDBResponse.status} ${exerciseDBResponse.statusText}`);
+        console.log(`📋 Response Headers:`, JSON.stringify(exerciseDBResponse.headers, null, 2));
+        
+        const rateLimitRemaining = exerciseDBResponse.headers['x-ratelimit-remaining'];
+        const rateLimitReset = exerciseDBResponse.headers['x-ratelimit-reset'];
+        if (rateLimitRemaining !== undefined) {
+          console.log(`⏱️ Rate Limit Remaining: ${rateLimitRemaining}`);
+        }
+        if (rateLimitReset !== undefined) {
+          console.log(`⏰ Rate Limit Resets At: ${rateLimitReset}`);
+        }
+
+        // Handle different status codes
+        if (exerciseDBResponse.status === 429) {
+          console.error(`🚫 RATE LIMIT EXCEEDED (429): Too many requests`);
+          console.error(`📄 Response data:`, JSON.stringify(exerciseDBResponse.data, null, 2));
+          hasMore = false;
+          break;
+        }
+        
+        if (exerciseDBResponse.status === 403) {
+          console.error(`🚫 FORBIDDEN (403): Plan limit exceeded or invalid API key`);
+          console.error(`📄 Response data:`, JSON.stringify(exerciseDBResponse.data, null, 2));
+          hasMore = false;
+          break;
+        }
+
+        if (exerciseDBResponse.status !== 200) {
+          console.error(`⚠️ Unexpected status code: ${exerciseDBResponse.status}`);
+          console.error(`📄 Response data:`, JSON.stringify(exerciseDBResponse.data, null, 2));
+        }
+
         const pageExercises = exerciseDBResponse.data || [];
+        
+        if (pageExercises && typeof pageExercises === 'object' && !Array.isArray(pageExercises)) {
+          if (pageExercises.message || pageExercises.error) {
+            console.error(`❌ API Error Response:`, JSON.stringify(pageExercises, null, 2));
+            hasMore = false;
+            break;
+          }
+        }
+        
         console.log(`✅ Page fetched: ${pageExercises.length} exercises (offset=${currentOffset})`);
+        console.log(`📦 Response type: ${Array.isArray(pageExercises) ? 'Array' : typeof pageExercises}`);
         
         if (pageExercises.length === 0) {
           hasMore = false;
@@ -72,7 +119,25 @@ router.post('/enhance', async (req: Request, res: Response) => {
           }
         }
       } catch (error: any) {
-        console.error(`❌ Error fetching page at offset=${currentOffset}:`, error.message);
+        console.error(`❌ Error fetching page at offset=${currentOffset}:`);
+        console.error(`   Error message: ${error.message}`);
+        console.error(`   Error code: ${error.code || 'N/A'}`);
+        
+        if (error.response) {
+          console.error(`   HTTP Status: ${error.response.status} ${error.response.statusText}`);
+          console.error(`   Response data:`, JSON.stringify(error.response.data, null, 2));
+          console.error(`   Response headers:`, JSON.stringify(error.response.headers, null, 2));
+          
+          if (error.response.status === 429) {
+            console.error(`🚫 RATE LIMIT EXCEEDED: Too many requests to ExerciseDB API`);
+          }
+          if (error.response.status === 403) {
+            console.error(`🚫 FORBIDDEN: Plan limit exceeded or invalid API key`);
+          }
+        } else if (error.request) {
+          console.error(`   No response received. Request details:`, JSON.stringify(error.request, null, 2));
+        }
+        
         hasMore = false;
         break;
       }
@@ -81,6 +146,14 @@ router.post('/enhance', async (req: Request, res: Response) => {
     const exercises = allExercises.slice(0, limit); 
     console.log(`✅ Total fetched: ${exercises.length} exercises from ExerciseDB (requested: ${limit})`);
     console.log(`📊 Pagination: Made ${Math.ceil(exercises.length / EXERCISES_DB_PAGE_SIZE)} requests`);
+    
+    if (exercises.length === 0) {
+      console.error(`⚠️ WARNING: No exercises fetched! This could indicate:`);
+      console.error(`   1. Rate limit exceeded (429)`);
+      console.error(`   2. Plan quota exhausted (403)`);
+      console.error(`   3. API key invalid or missing`);
+      console.error(`   4. Network/connectivity issue`);
+    }
 
     console.log('🖼️ Fetching images from Exercises11 and analyzing with Clarifai...');
     
@@ -152,12 +225,14 @@ router.post('/enhance', async (req: Request, res: Response) => {
       })
     );
 
-    console.log('📦 Sending enhanced exercises');
-
+    console.log('📦 Preparing final response...');
+    console.log(`   Enhanced exercises count: ${enhancedExercises.length}`);
+    console.log(`   Original exercises count: ${exercises.length}`);
+    
     const actualFetched = exercises.length;
     const hasMoreExercises = actualFetched === limit && hasMore;
-
-    res.json({
+    
+    const responsePayload = {
       success: true,
       message: `Successfully enhanced ${enhancedExercises.length} exercises`,
       exercises: enhancedExercises,
@@ -168,7 +243,17 @@ router.post('/enhance', async (req: Request, res: Response) => {
         hasMore: hasMoreExercises,
         nextOffset: hasMoreExercises ? offset + actualFetched : null
       }
-    });
+    };
+    
+    console.log('📤 Sending response:', JSON.stringify({
+      success: responsePayload.success,
+      message: responsePayload.message,
+      count: responsePayload.count,
+      pagination: responsePayload.pagination,
+      exercisesSample: enhancedExercises.length > 0 ? enhancedExercises.slice(0, 2).map((e: any) => ({ id: e.id, name: e.name })) : []
+    }, null, 2));
+
+    res.json(responsePayload);
 
   } catch (error: any) {
     console.error('💥 Exercise enhancement error:', error);
