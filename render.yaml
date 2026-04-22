@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: api-oq-agile-athletes
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: 20

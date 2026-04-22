@@ -1,7 +1,7 @@
 import { PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
 import { v4 as uuidv4 } from 'uuid';
 import { ddbDocClient } from '../config/ddbClient.js';
-const EXERCISE_HISTORY_TABLE = process.env.DDB_EXERCISE_HISTORY_TABLE || 'ExerciseHistory';
+const EXERCISE_HISTORY_TABLE = process.env.MONGO_EXERCISE_HISTORY_COLLECTION || 'exercise_history';
 async function recordExercise(userId, exerciseData) {
     console.log('=== MODEL: recordExercise function called ===');
     console.log('UserId received:', userId);

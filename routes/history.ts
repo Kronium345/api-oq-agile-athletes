@@ -12,7 +12,7 @@ import {
     isFavorite
 } from '../models/favorites.js';
 
-const FAVORITES_TABLE = process.env.DDB_FAVORITES_TABLE || 'Favorites';
+const FAVORITES_TABLE = process.env.MONGO_FAVORITES_COLLECTION || 'favorites';
 
 const router = express.Router();
 

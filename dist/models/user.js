@@ -2,7 +2,7 @@ import { GetCommand, PutCommand, QueryCommand, ScanCommand, UpdateCommand } from
 import bcrypt from 'bcryptjs';
 import { v4 as uuidv4 } from 'uuid';
 import { ddbDocClient } from '../config/ddbClient.js';
-const USERS_TABLE = process.env.DDB_USERS_TABLE || 'Users';
+const USERS_TABLE = process.env.MONGO_USERS_COLLECTION || 'users';
 async function createUser({ name, email, password }) {
     const userId = uuidv4();
     const hashedPassword = await bcrypt.hash(password, 12);

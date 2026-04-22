@@ -1,7 +1,7 @@
 import { PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
 import { ddbDocClient } from '../config/ddbClient.js';
 
-const ACTIVITY_TABLE = process.env.DDB_ACTIVITY_TABLE || 'UserActivity';
+const ACTIVITY_TABLE = process.env.MONGO_ACTIVITY_COLLECTION || 'user_activity';
 
 interface ActivityItem {
   userId: string;

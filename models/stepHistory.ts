@@ -1,7 +1,7 @@
 import { PutCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { ddbDocClient } from '../config/ddbClient.js';
 
-const STEP_HISTORY_TABLE = process.env.DDB_STEP_HISTORY_TABLE || 'StepHistory';
+const STEP_HISTORY_TABLE = process.env.MONGO_STEP_HISTORY_COLLECTION || 'step_history';
 
 interface StepHistoryItem {
   userId: string;

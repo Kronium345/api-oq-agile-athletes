@@ -3,7 +3,7 @@ import bcrypt from 'bcryptjs';
 import { v4 as uuidv4 } from 'uuid';
 import { ddbDocClient } from '../config/ddbClient.js';
 
-const USERS_TABLE = process.env.DDB_USERS_TABLE || 'Users';
+const USERS_TABLE = process.env.MONGO_USERS_COLLECTION || 'users';
 
 interface CreateUserParams {
   name: string;

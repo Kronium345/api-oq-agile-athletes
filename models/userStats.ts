@@ -1,7 +1,7 @@
 import { GetCommand, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { ddbDocClient } from '../config/ddbClient.js';
 
-const USER_STATS_TABLE = process.env.DDB_USER_STATS_TABLE || 'UserStats';
+const USER_STATS_TABLE = process.env.MONGO_USER_STATS_COLLECTION || 'user_stats';
 
 export interface UserStats {
   userId: string;

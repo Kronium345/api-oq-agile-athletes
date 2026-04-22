@@ -2,7 +2,7 @@ import { PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
 import { v4 as uuidv4 } from 'uuid';
 import { ddbDocClient } from '../config/ddbClient.js';
 
-const EXERCISE_HISTORY_TABLE = process.env.DDB_EXERCISE_HISTORY_TABLE || 'ExerciseHistory';
+const EXERCISE_HISTORY_TABLE = process.env.MONGO_EXERCISE_HISTORY_COLLECTION || 'exercise_history';
 
 // TypeScript interfaces
 interface SetDetail {

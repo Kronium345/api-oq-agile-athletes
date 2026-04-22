@@ -1,7 +1,7 @@
 import { DeleteCommand, PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
 import { ddbDocClient } from '../config/ddbClient.js';
 
-const FAVORITES_TABLE = process.env.DDB_FAVORITES_TABLE || 'Favorites';
+const FAVORITES_TABLE = process.env.MONGO_FAVORITES_COLLECTION || 'favorites';
 
 interface FavoriteItem {
   userId: string;

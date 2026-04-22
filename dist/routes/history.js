@@ -4,7 +4,7 @@ import { ddbDocClient } from '../config/ddbClient.js';
 import { authenticate } from '../middleware/auth.js';
 import { getAllExercises, recordExercise, } from '../models/exerciseHistory.js';
 import { getFavorites, isFavorite } from '../models/favorites.js';
-const FAVORITES_TABLE = process.env.DDB_FAVORITES_TABLE || 'Favorites';
+const FAVORITES_TABLE = process.env.MONGO_FAVORITES_COLLECTION || 'favorites';
 const router = express.Router();
 router.post('/history', authenticate, async (req, res) => {
     console.log('=== BACKEND: Exercise History Logging Started ===');

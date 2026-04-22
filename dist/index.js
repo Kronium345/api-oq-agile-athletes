@@ -1,6 +1,7 @@
 import cors from 'cors';
 import 'dotenv/config';
 import express from 'express';
+import { connectToMongo } from './config/mongoClient.js';
 import activityRoutes from './routes/activity.js';
 import authRoutes from './routes/auth.js';
 import exerciseRecognitionRoutes from './routes/exerciseRecognition.js';
@@ -42,8 +43,18 @@ app.use((req, res) => {
         message: 'Route not found',
     });
 });
-app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
-    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-});
+async function startServer() {
+    try {
+        await connectToMongo();
+        app.listen(PORT, () => {
+            console.log(`Server is running on port ${PORT}`);
+            console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+        });
+    }
+    catch (error) {
+        console.error('Failed to start server:', error.message);
+        process.exit(1);
+    }
+}
+startServer();
 export default app;
