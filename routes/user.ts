@@ -1,4 +1,5 @@
 import express, { Response } from 'express';
+import fs from 'fs';
 import multer from 'multer';
 import path from 'path';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
@@ -16,7 +17,13 @@ interface MulterRequest extends AuthenticatedRequest<UserParams> {
 
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    cb(null, 'uploads/avatars/');
+    const avatarDir = path.join('uploads', 'avatars');
+    try {
+      fs.mkdirSync(avatarDir, { recursive: true });
+      cb(null, avatarDir);
+    } catch (error) {
+      cb(error as Error, avatarDir);
+    }
   },
   filename: function (req, file, cb) {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);

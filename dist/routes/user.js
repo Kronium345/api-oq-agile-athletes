@@ -1,4 +1,5 @@
 import express from 'express';
+import fs from 'fs';
 import multer from 'multer';
 import path from 'path';
 import { authenticate } from '../middleware/auth.js';
@@ -6,7 +7,14 @@ import { getUserById, updateUser } from '../models/user.js';
 const router = express.Router();
 const storage = multer.diskStorage({
     destination: function (req, file, cb) {
-        cb(null, 'uploads/avatars/');
+        const avatarDir = path.join('uploads', 'avatars');
+        try {
+            fs.mkdirSync(avatarDir, { recursive: true });
+            cb(null, avatarDir);
+        }
+        catch (error) {
+            cb(error, avatarDir);
+        }
     },
     filename: function (req, file, cb) {
         const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
