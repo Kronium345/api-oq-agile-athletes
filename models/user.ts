@@ -1,7 +1,7 @@
-import { GetCommand, PutCommand, QueryCommand, ScanCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import bcrypt from 'bcryptjs';
+import { Collection } from 'mongodb';
 import { v4 as uuidv4 } from 'uuid';
-import { ddbDocClient } from '../config/ddbClient.js';
+import { getMongoClient, getMongoDbName } from '../config/mongoClient.js';
 
 const USERS_TABLE = process.env.MONGO_USERS_COLLECTION || 'users';
 
@@ -40,7 +40,14 @@ interface UpdateUserParams {
   [key: string]: any;
 }
 
+function getUsersCollection(): Collection<User> {
+  const client = getMongoClient();
+  const db = client.db(getMongoDbName());
+  return db.collection<User>(USERS_TABLE);
+}
+
 async function createUser({ name, email, password }: CreateUserParams): Promise<UserWithoutPassword> {
+  const usersCollection = getUsersCollection();
   const userId = uuidv4();
   const hashedPassword = await bcrypt.hash(password, 12);
   const createdAt = new Date().toISOString();
@@ -54,13 +61,7 @@ async function createUser({ name, email, password }: CreateUserParams): Promise<
     updatedAt: createdAt,
   };
 
-  await ddbDocClient.send(
-    new PutCommand({
-      TableName: USERS_TABLE,
-      Item: user,
-      ConditionExpression: 'attribute_not_exists(email)',
-    })
-  );
+  await usersCollection.insertOne(user);
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { password: _, ...userWithoutPassword } = user;
@@ -68,59 +69,23 @@ async function createUser({ name, email, password }: CreateUserParams): Promise<
 }
 
 async function getUserByEmail(email: string): Promise<User | null> {
-  try {
-    const result = await ddbDocClient.send(
-      new QueryCommand({
-        TableName: USERS_TABLE,
-        IndexName: 'email-index', 
-        KeyConditionExpression: 'email = :email',
-        ExpressionAttributeValues: {
-          ':email': email,
-        },
-      })
-    );
-
-    return (result.Items?.[0] as User) || null;
-  } catch (error: any) {
-    // If GSI doesn't exist, fallback to scan (not recommended for production)
-    console.warn('GSI not found, using alternative lookup method');
-    console.warn('Error:', error.message);
-    
-    try {
-      const result = await ddbDocClient.send(
-        new ScanCommand({
-          TableName: USERS_TABLE,
-          FilterExpression: 'email = :email',
-          ExpressionAttributeValues: {
-            ':email': email,
-          },
-        })
-      );
-      return (result.Items?.[0] as User) || null;
-    } catch (scanError: any) {
-      console.error('Scan fallback also failed:', scanError.message);
-      throw scanError;
-    }
-  }
+  const usersCollection = getUsersCollection();
+  return usersCollection.findOne({ email });
 }
 
 /**
  * Get user by userId
  */
 async function getUserById(userId: string): Promise<UserWithoutPassword | null> {
-  const result = await ddbDocClient.send(
-    new GetCommand({
-      TableName: USERS_TABLE,
-      Key: { userId },
-    })
-  );
+  const usersCollection = getUsersCollection();
+  const user = await usersCollection.findOne({ userId });
 
-  if (!result.Item) return null;
+  if (!user) return null;
 
   // Remove password from response
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { password: _, ...user } = result.Item as User;
-  return user;
+  const { password: _, ...userWithoutPassword } = user;
+  return userWithoutPassword;
 }
 
 /**
@@ -149,29 +114,13 @@ async function authenticateUser(email: string, password: string): Promise<AuthRe
  * Update user
  */
 async function updateUser(userId: string, updates: UpdateUserParams): Promise<UserWithoutPassword | null> {
-  const updateExpression: string[] = [];
-  const expressionAttributeNames: Record<string, string> = {};
-  const expressionAttributeValues: Record<string, any> = {};
+  const usersCollection = getUsersCollection();
+  const updateDoc = {
+    ...updates,
+    updatedAt: new Date().toISOString(),
+  };
 
-  Object.keys(updates).forEach((key, index) => {
-    updateExpression.push(`#attr${index} = :val${index}`);
-    expressionAttributeNames[`#attr${index}`] = key;
-    expressionAttributeValues[`:val${index}`] = updates[key];
-  });
-
-  updateExpression.push('#updatedAt = :updatedAt');
-  expressionAttributeNames['#updatedAt'] = 'updatedAt';
-  expressionAttributeValues[':updatedAt'] = new Date().toISOString();
-
-  await ddbDocClient.send(
-    new UpdateCommand({
-      TableName: USERS_TABLE,
-      Key: { userId },
-      UpdateExpression: `SET ${updateExpression.join(', ')}`,
-      ExpressionAttributeNames: expressionAttributeNames,
-      ExpressionAttributeValues: expressionAttributeValues,
-    })
-  );
+  await usersCollection.updateOne({ userId }, { $set: updateDoc });
 
   return getUserById(userId);
 }
