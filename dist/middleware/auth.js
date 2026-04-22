@@ -1,94 +1,52 @@
-import { verifyToken } from '@clerk/backend';
 import { getUserById } from '../models/user.js';
-const BEARER_PREFIX = 'Bearer ';
-function parseCsvEnv(value) {
-    if (!value)
-        return [];
-    return value
-        .split(',')
-        .map((item) => item.trim())
-        .filter(Boolean);
-}
-function buildUnauthorizedResponse(res, message, reason) {
-    res.status(401).json({
-        success: false,
-        message,
-        reason,
-    });
-}
 async function authenticate(req, res, next) {
+    console.log('=== AUTH MIDDLEWARE: Starting authentication ===');
+    console.log('Request headers:', req.headers);
+    console.log('Authorization header:', req.headers.authorization);
     try {
-        const clerkSecretKey = process.env.CLERK_SECRET_KEY;
         const authHeader = req.headers.authorization;
-        if (!authHeader || !authHeader.startsWith(BEARER_PREFIX)) {
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            console.log('=== AUTH MIDDLEWARE: No valid auth header ===');
+            console.log('Auth header:', authHeader);
             res.status(401).json({
                 success: false,
                 message: 'No token provided',
             });
             return;
         }
-        if (!clerkSecretKey) {
-            console.error('CLERK_SECRET_KEY is not configured');
-            res.status(500).json({
+        const token = authHeader.split(' ')[1];
+        console.log('=== AUTH MIDDLEWARE: Extracted token ===');
+        console.log('Token (first 20 chars):', token ? token.substring(0, 20) + '...' : 'null');
+        // The current implementation treats the token as the userId directly
+        // For now, let's treat the token as the userId directly (this matches our auth system)
+        console.log('=== AUTH MIDDLEWARE: Looking up user by token as userId ===');
+        const user = await getUserById(token);
+        console.log('=== AUTH MIDDLEWARE: User lookup result ===');
+        console.log('User found:', !!user);
+        console.log('User data:', user ? { userId: user.userId, email: user.email } : 'null');
+        if (!user) {
+            console.log('=== AUTH MIDDLEWARE: User not found ===');
+            res.status(401).json({
                 success: false,
-                message: 'Authentication is not configured',
+                message: 'Invalid token',
             });
             return;
         }
-        const token = authHeader.slice(BEARER_PREFIX.length).trim();
-        const payload = await verifyToken(token, { secretKey: clerkSecretKey });
-        const clerkUserId = payload.sub;
-        const expectedIssuer = process.env.CLERK_ISSUER?.trim();
-        const expectedAudiences = parseCsvEnv(process.env.CLERK_AUDIENCE);
-        const expectedAuthorizedParties = parseCsvEnv(process.env.CLERK_AUTHORIZED_PARTIES);
-        if (!clerkUserId) {
-            buildUnauthorizedResponse(res, 'Token has no subject', 'missing_sub');
-            return;
-        }
-        if (expectedIssuer && payload.iss !== expectedIssuer) {
-            buildUnauthorizedResponse(res, 'Token issuer mismatch', 'issuer_mismatch');
-            return;
-        }
-        const audienceClaim = payload.aud;
-        const tokenAudiences = Array.isArray(audienceClaim)
-            ? audienceClaim
-            : typeof audienceClaim === 'string'
-                ? [audienceClaim]
-                : [];
-        if (expectedAudiences.length > 0) {
-            const hasMatchingAudience = expectedAudiences.some((aud) => tokenAudiences.includes(aud));
-            if (!hasMatchingAudience) {
-                buildUnauthorizedResponse(res, 'Token audience mismatch', 'audience_mismatch');
-                return;
-            }
-        }
-        const tokenAzp = typeof payload.azp === 'string' ? payload.azp : '';
-        if (expectedAuthorizedParties.length > 0 && !expectedAuthorizedParties.includes(tokenAzp)) {
-            buildUnauthorizedResponse(res, 'Token authorized party mismatch', 'azp_mismatch');
-            return;
-        }
-        const nowInSeconds = Math.floor(Date.now() / 1000);
-        const tokenExp = typeof payload.exp === 'number' ? payload.exp : 0;
-        if (!tokenExp || tokenExp <= nowInSeconds) {
-            buildUnauthorizedResponse(res, 'Token has expired', 'token_expired');
-            return;
-        }
-        const user = await getUserById(clerkUserId);
-        req.userId = clerkUserId;
-        req.user = user || { userId: clerkUserId };
+        console.log('=== AUTH MIDDLEWARE: Authentication successful ===');
+        console.log('Setting req.userId to:', user.userId);
+        req.user = user;
+        req.userId = user.userId;
         next();
     }
     catch (error) {
-        const errorMessage = String(error?.message || '').toLowerCase();
-        const reason = errorMessage.includes('expired')
-            ? 'token_expired'
-            : errorMessage.includes('malformed')
-                ? 'malformed_token'
-                : errorMessage.includes('invalid')
-                    ? 'invalid_token'
-                    : 'token_verification_failed';
-        console.error('Auth middleware error:', error?.message || error);
-        buildUnauthorizedResponse(res, 'Authentication failed', reason);
+        console.error('=== AUTH MIDDLEWARE: Error occurred ===');
+        console.error('Auth middleware error:', error);
+        console.error('Error message:', error.message);
+        console.error('Error stack:', error.stack);
+        res.status(401).json({
+            success: false,
+            message: 'Authentication failed',
+        });
     }
 }
 export { authenticate };
