@@ -1,48 +1,42 @@
+import { verifyToken } from '@clerk/backend';
 import { getUserById } from '../models/user.js';
+const BEARER_PREFIX = 'Bearer ';
 async function authenticate(req, res, next) {
-    console.log('=== AUTH MIDDLEWARE: Starting authentication ===');
-    console.log('Request headers:', req.headers);
-    console.log('Authorization header:', req.headers.authorization);
     try {
+        const clerkSecretKey = process.env.CLERK_SECRET_KEY;
         const authHeader = req.headers.authorization;
-        if (!authHeader || !authHeader.startsWith('Bearer ')) {
-            console.log('=== AUTH MIDDLEWARE: No valid auth header ===');
-            console.log('Auth header:', authHeader);
+        if (!authHeader || !authHeader.startsWith(BEARER_PREFIX)) {
             res.status(401).json({
                 success: false,
                 message: 'No token provided',
             });
             return;
         }
-        const token = authHeader.split(' ')[1];
-        console.log('=== AUTH MIDDLEWARE: Extracted token ===');
-        console.log('Token (first 20 chars):', token ? token.substring(0, 20) + '...' : 'null');
-        // The current implementation treats the token as the userId directly
-        // For now, let's treat the token as the userId directly (this matches our auth system)
-        console.log('=== AUTH MIDDLEWARE: Looking up user by token as userId ===');
-        const user = await getUserById(token);
-        console.log('=== AUTH MIDDLEWARE: User lookup result ===');
-        console.log('User found:', !!user);
-        console.log('User data:', user ? { userId: user.userId, email: user.email } : 'null');
-        if (!user) {
-            console.log('=== AUTH MIDDLEWARE: User not found ===');
-            res.status(401).json({
+        if (!clerkSecretKey) {
+            console.error('CLERK_SECRET_KEY is not configured');
+            res.status(500).json({
                 success: false,
-                message: 'Invalid token',
+                message: 'Authentication is not configured',
             });
             return;
         }
-        console.log('=== AUTH MIDDLEWARE: Authentication successful ===');
-        console.log('Setting req.userId to:', user.userId);
-        req.user = user;
-        req.userId = user.userId;
+        const token = authHeader.slice(BEARER_PREFIX.length).trim();
+        const payload = await verifyToken(token, { secretKey: clerkSecretKey });
+        const clerkUserId = payload.sub;
+        if (!clerkUserId) {
+            res.status(401).json({
+                success: false,
+                message: 'Token has no subject',
+            });
+            return;
+        }
+        const user = await getUserById(clerkUserId);
+        req.userId = clerkUserId;
+        req.user = user || { userId: clerkUserId };
         next();
     }
     catch (error) {
-        console.error('=== AUTH MIDDLEWARE: Error occurred ===');
-        console.error('Auth middleware error:', error);
-        console.error('Error message:', error.message);
-        console.error('Error stack:', error.stack);
+        console.error('Auth middleware error:', error?.message || error);
         res.status(401).json({
             success: false,
             message: 'Authentication failed',
