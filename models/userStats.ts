@@ -36,6 +36,16 @@ function buildDefaultStats(userId: string): UserStats {
   };
 }
 
+function buildInsertDefaults(userId: string) {
+  return {
+    userId,
+    totalWorkouts: 0,
+    totalCalories: 0,
+    totalMinutes: 0,
+    createdAt: new Date().toISOString(),
+  };
+}
+
 /**
  * Get user stats - creates default stats if user doesn't exist
  */
@@ -73,7 +83,7 @@ export async function updateUserStats(
     const updateResult = await collection.findOneAndUpdate(
       { userId },
       {
-        $setOnInsert: buildDefaultStats(userId),
+        $setOnInsert: buildInsertDefaults(userId),
         $set: { lastUpdated: now },
         $inc: {
           totalWorkouts: updates.workouts ?? 0,
