@@ -1,52 +1,39 @@
-import { PutCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
-import { ddbDocClient } from '../config/ddbClient.js';
+import { getMongoClient, getMongoDbName } from '../config/mongoClient.js';
 const STEP_HISTORY_TABLE = process.env.MONGO_STEP_HISTORY_COLLECTION || 'step_history';
+function getStepHistoryCollection() {
+    const client = getMongoClient();
+    const db = client.db(getMongoDbName());
+    return db.collection(STEP_HISTORY_TABLE);
+}
 async function recordSteps(userId, date, stepCount) {
+    const collection = getStepHistoryCollection();
+    const now = new Date().toISOString();
     const item = {
         userId,
         date,
         stepCount: Number(stepCount),
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        createdAt: now,
+        updatedAt: now,
     };
-    await ddbDocClient.send(new PutCommand({
-        TableName: STEP_HISTORY_TABLE,
-        Item: item,
-    }));
-    return item;
+    await collection.updateOne({ userId, date }, { $set: { stepCount: item.stepCount, updatedAt: now }, $setOnInsert: { createdAt: now } }, { upsert: true });
+    return {
+        ...item,
+        createdAt: (await getStepsByDate(userId, date))?.createdAt || now,
+    };
 }
 async function getStepHistory(userId, startDate, endDate) {
-    const result = await ddbDocClient.send(new QueryCommand({
-        TableName: STEP_HISTORY_TABLE,
-        KeyConditionExpression: 'userId = :userId AND #date BETWEEN :startDate AND :endDate',
-        ExpressionAttributeNames: {
-            '#date': 'date',
-        },
-        ExpressionAttributeValues: {
-            ':userId': userId,
-            ':startDate': startDate,
-            ':endDate': endDate,
-        },
-        ScanIndexForward: false, // Sort descending by date
-    }));
-    return (result.Items || []);
+    const collection = getStepHistoryCollection();
+    return collection
+        .find({ userId, date: { $gte: startDate, $lte: endDate } })
+        .sort({ date: -1 })
+        .toArray();
 }
 /**
  * Get step count for a specific date
  */
 async function getStepsByDate(userId, date) {
-    const result = await ddbDocClient.send(new QueryCommand({
-        TableName: STEP_HISTORY_TABLE,
-        KeyConditionExpression: 'userId = :userId AND #date = :date',
-        ExpressionAttributeNames: {
-            '#date': 'date',
-        },
-        ExpressionAttributeValues: {
-            ':userId': userId,
-            ':date': date,
-        },
-    }));
-    return result.Items?.[0] || null;
+    const collection = getStepHistoryCollection();
+    return collection.findOne({ userId, date });
 }
 /**
  * Get total steps for a user (all time or within date range)
@@ -57,15 +44,8 @@ async function getTotalSteps(userId, startDate = null, endDate = null) {
         items = await getStepHistory(userId, startDate, endDate);
     }
     else {
-        // Get all steps for user
-        const result = await ddbDocClient.send(new QueryCommand({
-            TableName: STEP_HISTORY_TABLE,
-            KeyConditionExpression: 'userId = :userId',
-            ExpressionAttributeValues: {
-                ':userId': userId,
-            },
-        }));
-        items = (result.Items || []);
+        const collection = getStepHistoryCollection();
+        items = await collection.find({ userId }).toArray();
     }
     return items.reduce((total, item) => total + (item.stepCount || 0), 0);
 }
@@ -73,18 +53,11 @@ async function getTotalSteps(userId, startDate = null, endDate = null) {
  * Update step count for a specific date
  */
 async function updateSteps(userId, date, stepCount) {
-    await ddbDocClient.send(new UpdateCommand({
-        TableName: STEP_HISTORY_TABLE,
-        Key: {
-            userId,
-            date,
-        },
-        UpdateExpression: 'SET stepCount = :stepCount, updatedAt = :updatedAt',
-        ExpressionAttributeValues: {
-            ':stepCount': Number(stepCount),
-            ':updatedAt': new Date().toISOString(),
-        },
-    }));
+    const collection = getStepHistoryCollection();
+    await collection.updateOne({ userId, date }, {
+        $set: { stepCount: Number(stepCount), updatedAt: new Date().toISOString() },
+        $setOnInsert: { createdAt: new Date().toISOString() },
+    }, { upsert: true });
     return getStepsByDate(userId, date);
 }
 export { getStepHistory, getStepsByDate, getTotalSteps, recordSteps, updateSteps };

@@ -1,16 +1,18 @@
-import { PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
 import { v4 as uuidv4 } from 'uuid';
-import { ddbDocClient } from '../config/ddbClient.js';
+import { getMongoClient, getMongoDbName } from '../config/mongoClient.js';
 const EXERCISE_HISTORY_TABLE = process.env.MONGO_EXERCISE_HISTORY_COLLECTION || 'exercise_history';
+function getExerciseHistoryCollection() {
+    const client = getMongoClient();
+    const db = client.db(getMongoDbName());
+    return db.collection(EXERCISE_HISTORY_TABLE);
+}
 async function recordExercise(userId, exerciseData) {
-    console.log('=== MODEL: recordExercise function called ===');
-    console.log('UserId received:', userId);
-    console.log('Exercise data received:', JSON.stringify(exerciseData, null, 2));
-    console.log('Table name:', EXERCISE_HISTORY_TABLE);
+    console.log('[exercise-history] recordExercise called', {
+        userId,
+        exerciseName: exerciseData.exerciseName,
+    });
     const exerciseId = uuidv4();
     const timeStamp = new Date().toISOString();
-    console.log('Generated exerciseId:', exerciseId);
-    console.log('Generated timeStamp:', timeStamp);
     let processedSetDetails = null;
     if (exerciseData.setDetails) {
         if (Array.isArray(exerciseData.setDetails)) {
@@ -39,24 +41,16 @@ async function recordExercise(userId, exerciseData) {
         notes: exerciseData.notes || '',
         createdAt: timeStamp,
     };
-    console.log('=== MODEL: Final item to be inserted ===');
-    console.log(JSON.stringify(item, null, 2));
+    const collection = getExerciseHistoryCollection();
     try {
-        console.log('=== MODEL: Sending to DynamoDB ===');
-        const command = new PutCommand({
-            TableName: EXERCISE_HISTORY_TABLE,
-            Item: item,
-        });
-        console.log('DynamoDB command:', command);
-        const result = await ddbDocClient.send(command);
-        console.log('=== MODEL: DynamoDB insert successful ===');
-        console.log('DynamoDB result:', result);
+        await collection.insertOne(item);
         return item;
     }
     catch (error) {
-        console.error('=== MODEL: DynamoDB insert failed ===');
-        console.error('Error:', error);
-        console.error('Error message:', error.message);
+        console.error('[exercise-history] DB insert failed', {
+            userId,
+            message: error?.message,
+        });
         throw error;
     }
 }
@@ -64,58 +58,38 @@ async function recordExercise(userId, exerciseData) {
  * Get exercise history for a user within a date range
  */
 async function getExerciseHistory(userId, startDate, endDate) {
-    const result = await ddbDocClient.send(new QueryCommand({
-        TableName: EXERCISE_HISTORY_TABLE,
-        KeyConditionExpression: 'userId = :userId AND #timeStamp BETWEEN :startDate AND :endDate',
-        ExpressionAttributeNames: {
-            '#timeStamp': 'timeStamp',
-        },
-        ExpressionAttributeValues: {
-            ':userId': userId,
-            ':startDate': startDate,
-            ':endDate': endDate,
-        },
-        ScanIndexForward: false,
-    }));
-    return (result.Items || []);
+    const collection = getExerciseHistoryCollection();
+    const start = new Date(startDate).toISOString();
+    const end = new Date(endDate).toISOString();
+    return collection
+        .find({ userId, timeStamp: { $gte: start, $lte: end } })
+        .sort({ timeStamp: -1 })
+        .toArray();
 }
 /**
  * Get all exercises for a user (paginated)
  */
 async function getAllExercises(userId, limit = 50, lastEvaluatedKey = null) {
-    const params = {
-        TableName: EXERCISE_HISTORY_TABLE,
-        KeyConditionExpression: 'userId = :userId',
-        ExpressionAttributeValues: {
-            ':userId': userId,
-        },
-        ScanIndexForward: false,
-        Limit: limit,
-    };
-    if (lastEvaluatedKey) {
-        params.ExclusiveStartKey = lastEvaluatedKey;
+    const collection = getExerciseHistoryCollection();
+    const query = { userId };
+    if (lastEvaluatedKey?.timeStamp) {
+        query.timeStamp = { $lt: String(lastEvaluatedKey.timeStamp) };
     }
-    const result = await ddbDocClient.send(new QueryCommand(params));
+    const items = await collection.find(query).sort({ timeStamp: -1 }).limit(limit).toArray();
+    const lastItem = items[items.length - 1];
     return {
-        items: (result.Items || []),
-        lastEvaluatedKey: result.LastEvaluatedKey,
+        items,
+        lastEvaluatedKey: lastItem
+            ? { userId: lastItem.userId, timeStamp: lastItem.timeStamp }
+            : undefined,
     };
 }
 /**
  * Get exercise by ID
  */
 async function getExerciseById(userId, exerciseId) {
-    // Since exerciseId is not part of the key, we need to query and filter
-    const result = await ddbDocClient.send(new QueryCommand({
-        TableName: EXERCISE_HISTORY_TABLE,
-        KeyConditionExpression: 'userId = :userId',
-        FilterExpression: 'exerciseId = :exerciseId',
-        ExpressionAttributeValues: {
-            ':userId': userId,
-            ':exerciseId': exerciseId,
-        },
-    }));
-    return (result.Items?.[0] || null);
+    const collection = getExerciseHistoryCollection();
+    return collection.findOne({ userId, exerciseId });
 }
 /**
  * Get total exercise duration for a user (all time or within date range)

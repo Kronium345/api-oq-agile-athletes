@@ -1,62 +1,39 @@
-import { DeleteCommand, PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
-import { ddbDocClient } from '../config/ddbClient.js';
+import { getMongoClient, getMongoDbName } from '../config/mongoClient.js';
 const FAVORITES_TABLE = process.env.MONGO_FAVORITES_COLLECTION || 'favorites';
+function getFavoritesCollection() {
+    const client = getMongoClient();
+    const db = client.db(getMongoDbName());
+    return db.collection(FAVORITES_TABLE);
+}
 async function toggleFavorite(userId, exerciseIdentifier) {
     const timestamp = new Date().toISOString();
+    const collection = getFavoritesCollection();
     try {
         const isCurrentlyFavorite = await isFavorite(userId, exerciseIdentifier);
         if (!isCurrentlyFavorite) {
-            // Add to favorites
-            await ddbDocClient.send(new PutCommand({
-                TableName: FAVORITES_TABLE,
-                Item: {
-                    userId,
-                    exerciseName: exerciseIdentifier,
-                    isFavorite: true,
-                    createdAt: timestamp,
-                    updatedAt: timestamp,
-                },
-            }));
+            await collection.updateOne({ userId, exerciseName: exerciseIdentifier }, {
+                $set: { isFavorite: true, updatedAt: timestamp },
+                $setOnInsert: { createdAt: timestamp },
+            }, { upsert: true });
             return { userId, exerciseName: exerciseIdentifier, isFavorite: true };
         }
         else {
-            // Remove from favorites
-            await ddbDocClient.send(new DeleteCommand({
-                TableName: FAVORITES_TABLE,
-                Key: {
-                    userId,
-                    exerciseName: exerciseIdentifier,
-                },
-            }));
+            await collection.deleteOne({ userId, exerciseName: exerciseIdentifier });
             return { userId, exerciseName: exerciseIdentifier, isFavorite: false };
         }
     }
     catch (error) {
         console.error('Error in toggleFavorite:', error);
-        if (error.name === 'ResourceNotFoundException' || error.__type?.includes('ResourceNotFoundException')) {
-            console.warn(`Favorites table '${FAVORITES_TABLE}' does not exist. Simulating toggle for user experience.`);
-            return { userId, exerciseName: exerciseIdentifier, isFavorite: true };
-        }
         throw error;
     }
 }
 async function getFavorites(userId) {
     try {
-        const result = await ddbDocClient.send(new QueryCommand({
-            TableName: FAVORITES_TABLE,
-            KeyConditionExpression: 'userId = :userId',
-            ExpressionAttributeValues: {
-                ':userId': userId,
-            },
-        }));
-        return (result.Items || []);
+        const collection = getFavoritesCollection();
+        return collection.find({ userId }).toArray();
     }
     catch (error) {
         console.error('Error getting favorites:', error);
-        if (error.name === 'ResourceNotFoundException' || error.__type?.includes('ResourceNotFoundException')) {
-            console.warn(`Favorites table '${FAVORITES_TABLE}' does not exist. Returning empty favorites list.`);
-            return [];
-        }
         throw error;
     }
 }
@@ -65,23 +42,12 @@ async function getFavorites(userId) {
  */
 async function isFavorite(userId, exerciseName) {
     try {
-        const result = await ddbDocClient.send(new QueryCommand({
-            TableName: FAVORITES_TABLE,
-            KeyConditionExpression: 'userId = :userId AND exerciseName = :exerciseName',
-            ExpressionAttributeValues: {
-                ':userId': userId,
-                ':exerciseName': exerciseName,
-            },
-            Limit: 1,
-        }));
-        return result.Items !== undefined && result.Items.length > 0;
+        const collection = getFavoritesCollection();
+        const favorite = await collection.findOne({ userId, exerciseName }, { projection: { _id: 1 } });
+        return Boolean(favorite);
     }
     catch (error) {
         console.error('Error checking favorite:', error);
-        if (error.name === 'ResourceNotFoundException' || error.__type?.includes('ResourceNotFoundException')) {
-            console.warn(`Favorites table '${FAVORITES_TABLE}' does not exist. Returning false for isFavorite check.`);
-            return false;
-        }
         return false;
     }
 }

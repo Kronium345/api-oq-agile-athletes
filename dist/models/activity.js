@@ -1,6 +1,10 @@
-import { PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
-import { ddbDocClient } from '../config/ddbClient.js';
+import { getMongoClient, getMongoDbName } from '../config/mongoClient.js';
 const ACTIVITY_TABLE = process.env.MONGO_ACTIVITY_COLLECTION || 'user_activity';
+function getActivityCollection() {
+    const client = getMongoClient();
+    const db = client.db(getMongoDbName());
+    return db.collection(ACTIVITY_TABLE);
+}
 async function recordActivity(userId, date) {
     if (!userId) {
         throw new Error('userId is required');
@@ -19,23 +23,11 @@ async function recordActivity(userId, date) {
         createdAt: timestamp,
         updatedAt: timestamp,
     };
-    try {
-        await ddbDocClient.send(new PutCommand({
-            TableName: ACTIVITY_TABLE,
-            Item: item,
-            // Only create if it doesn't exist for this date
-            ConditionExpression: 'attribute_not_exists(userId) AND attribute_not_exists(#date)',
-            ExpressionAttributeNames: {
-                '#date': 'date'
-            }
-        }));
-    }
-    catch (error) {
-        // If item already exists, that's okay - just ignore the condition failure
-        if (error.name !== 'ConditionalCheckFailedException') {
-            throw error;
-        }
-    }
+    const collection = getActivityCollection();
+    await collection.updateOne({ userId, date: activityDate }, {
+        $setOnInsert: item,
+        $set: { updatedAt: timestamp, timestamp },
+    }, { upsert: true });
     return item;
 }
 /**
@@ -46,19 +38,10 @@ async function getActivityData(userId, startDate, endDate) {
         console.error('getActivityData: Missing userId, startDate, or endDate');
         throw new Error('Missing required parameters for getActivityData');
     }
-    const result = await ddbDocClient.send(new QueryCommand({
-        TableName: ACTIVITY_TABLE,
-        KeyConditionExpression: 'userId = :userId AND #date BETWEEN :startDate AND :endDate',
-        ExpressionAttributeNames: {
-            '#date': 'date'
-        },
-        ExpressionAttributeValues: {
-            ':userId': userId,
-            ':startDate': startDate,
-            ':endDate': endDate,
-        },
-        ScanIndexForward: false, // Sort by date descending
-    }));
-    return (result.Items || []);
+    const collection = getActivityCollection();
+    return collection
+        .find({ userId, date: { $gte: startDate, $lte: endDate } })
+        .sort({ date: -1 })
+        .toArray();
 }
 export { getActivityData, recordActivity };
