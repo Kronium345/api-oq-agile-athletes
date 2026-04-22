@@ -1,5 +1,5 @@
-import { GetCommand, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
-import { ddbDocClient } from '../config/ddbClient.js';
+import { Collection } from 'mongodb';
+import { getMongoClient, getMongoDbName } from '../config/mongoClient.js';
 
 const USER_STATS_TABLE = process.env.MONGO_USER_STATS_COLLECTION || 'user_stats';
 
@@ -18,57 +18,44 @@ interface UpdateStatsParams {
   minutes?: number;
 }
 
+function getUserStatsCollection(): Collection<UserStats> {
+  const client = getMongoClient();
+  const db = client.db(getMongoDbName());
+  return db.collection<UserStats>(USER_STATS_TABLE);
+}
+
+function buildDefaultStats(userId: string): UserStats {
+  const now = new Date().toISOString();
+  return {
+    userId,
+    totalWorkouts: 0,
+    totalCalories: 0,
+    totalMinutes: 0,
+    lastUpdated: now,
+    createdAt: now,
+  };
+}
+
 /**
  * Get user stats - creates default stats if user doesn't exist
  */
 export async function getUserStats(userId: string): Promise<UserStats> {
+  const collection = getUserStatsCollection();
   try {
-    const command = new GetCommand({
-      TableName: USER_STATS_TABLE,
-      Key: { userId },
-    });
-
-    const result = await ddbDocClient.send(command);
-
-    if (result.Item) {
-      return result.Item as UserStats;
+    const existing = await collection.findOne({ userId });
+    if (existing) {
+      return existing;
     }
 
-    // User doesn't have stats yet - create default
-    const defaultStats: UserStats = {
-      userId,
-      totalWorkouts: 0,
-      totalCalories: 0,
-      totalMinutes: 0,
-      lastUpdated: new Date().toISOString(),
-      createdAt: new Date().toISOString(),
-    };
-
-    // Create the record
-    await ddbDocClient.send(
-      new PutCommand({
-        TableName: USER_STATS_TABLE,
-        Item: defaultStats,
-      })
-    );
+    const defaultStats = buildDefaultStats(userId);
+    await collection.insertOne(defaultStats);
 
     return defaultStats;
   } catch (error: any) {
-    console.error('Error getting user stats:', error);
-    
-    // If table doesn't exist, return default stats
-    if (error.name === 'ResourceNotFoundException') {
-      console.warn('UserStats table not found - returning default stats');
-      return {
-        userId,
-        totalWorkouts: 0,
-        totalCalories: 0,
-        totalMinutes: 0,
-        lastUpdated: new Date().toISOString(),
-        createdAt: new Date().toISOString(),
-      };
-    }
-    
+    console.error('[user-stats] DB error in getUserStats', {
+      userId,
+      message: error?.message,
+    });
     throw error;
   }
 }
@@ -80,63 +67,41 @@ export async function updateUserStats(
   userId: string,
   updates: UpdateStatsParams
 ): Promise<UserStats> {
+  const collection = getUserStatsCollection();
   try {
-    // First, get current stats (or create if doesn't exist)
-    const currentStats = await getUserStats(userId);
+    const now = new Date().toISOString();
+    const updateResult = await collection.findOneAndUpdate(
+      { userId },
+      {
+        $setOnInsert: buildDefaultStats(userId),
+        $set: { lastUpdated: now },
+        $inc: {
+          totalWorkouts: updates.workouts ?? 0,
+          totalCalories: updates.calories ?? 0,
+          totalMinutes: updates.minutes ?? 0,
+        },
+      },
+      {
+        upsert: true,
+        returnDocument: 'after',
+      }
+    );
 
-    // Build update expression
-    const updateExpressions: string[] = [];
-    const expressionAttributeNames: Record<string, string> = {};
-    const expressionAttributeValues: Record<string, number> = {};
-
-    if (updates.workouts !== undefined) {
-      updateExpressions.push('#workouts = #workouts + :workouts');
-      expressionAttributeNames['#workouts'] = 'totalWorkouts';
-      expressionAttributeValues[':workouts'] = updates.workouts;
+    if (!updateResult) {
+      throw new Error('Failed to update stats document');
     }
 
-    if (updates.calories !== undefined) {
-      updateExpressions.push('#calories = #calories + :calories');
-      expressionAttributeNames['#calories'] = 'totalCalories';
-      expressionAttributeValues[':calories'] = updates.calories;
+    const updated = await collection.findOne({ userId });
+    if (!updated) {
+      throw new Error('Stats document missing after update');
     }
-
-    if (updates.minutes !== undefined) {
-      updateExpressions.push('#minutes = #minutes + :minutes');
-      expressionAttributeNames['#minutes'] = 'totalMinutes';
-      expressionAttributeValues[':minutes'] = updates.minutes;
-    }
-
-    // Always update lastUpdated
-    updateExpressions.push('#lastUpdated = :lastUpdated');
-    expressionAttributeNames['#lastUpdated'] = 'lastUpdated';
-    expressionAttributeValues[':lastUpdated'] = Date.now();
-
-    // If no updates, just return current stats
-    if (updateExpressions.length === 1) {
-      return currentStats;
-    }
-
-    const command = new UpdateCommand({
-      TableName: USER_STATS_TABLE,
-      Key: { userId },
-      UpdateExpression: `SET ${updateExpressions.join(', ')}`,
-      ExpressionAttributeNames: expressionAttributeNames,
-      ExpressionAttributeValues: expressionAttributeValues,
-      ReturnValues: 'ALL_NEW',
-    });
-
-    const result = await ddbDocClient.send(command);
-    return result.Attributes as UserStats;
+    return updated;
   } catch (error: any) {
-    console.error('Error updating user stats:', error);
-    
-    // If table doesn't exist, return current stats without updating
-    if (error.name === 'ResourceNotFoundException') {
-      console.warn('UserStats table not found - stats not updated');
-      return await getUserStats(userId);
-    }
-    
+    console.error('[user-stats] DB error in updateUserStats', {
+      userId,
+      updates,
+      message: error?.message,
+    });
     throw error;
   }
 }
@@ -145,26 +110,17 @@ export async function updateUserStats(
  * Reset user stats (optional - for testing/admin purposes)
  */
 export async function resetUserStats(userId: string): Promise<UserStats> {
-  const resetStats: UserStats = {
-    userId,
-    totalWorkouts: 0,
-    totalCalories: 0,
-    totalMinutes: 0,
-    lastUpdated: new Date().toISOString(),
-    createdAt: new Date().toISOString(),
-  };
+  const collection = getUserStatsCollection();
+  const resetStats = buildDefaultStats(userId);
 
   try {
-    await ddbDocClient.send(
-      new PutCommand({
-        TableName: USER_STATS_TABLE,
-        Item: resetStats,
-      })
-    );
-
+    await collection.replaceOne({ userId }, resetStats, { upsert: true });
     return resetStats;
   } catch (error: any) {
-    console.error('Error resetting user stats:', error);
+    console.error('[user-stats] DB error in resetUserStats', {
+      userId,
+      message: error?.message,
+    });
     throw error;
   }
 }

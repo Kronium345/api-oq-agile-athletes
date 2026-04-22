@@ -1,5 +1,5 @@
-import { PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
-import { ddbDocClient } from '../config/ddbClient.js';
+import { Collection } from 'mongodb';
+import { getMongoClient, getMongoDbName } from '../config/mongoClient.js';
 
 const ACTIVITY_TABLE = process.env.MONGO_ACTIVITY_COLLECTION || 'user_activity';
 
@@ -10,6 +10,12 @@ interface ActivityItem {
   activityType: string;
   createdAt: string;
   updatedAt: string;
+}
+
+function getActivityCollection(): Collection<ActivityItem> {
+  const client = getMongoClient();
+  const db = client.db(getMongoDbName());
+  return db.collection<ActivityItem>(ACTIVITY_TABLE);
 }
 
 async function recordActivity(userId: string, date?: string): Promise<ActivityItem> {
@@ -34,24 +40,15 @@ async function recordActivity(userId: string, date?: string): Promise<ActivityIt
     updatedAt: timestamp,
   };
 
-  try {
-    await ddbDocClient.send(
-      new PutCommand({
-        TableName: ACTIVITY_TABLE,
-        Item: item,
-        // Only create if it doesn't exist for this date
-        ConditionExpression: 'attribute_not_exists(userId) AND attribute_not_exists(#date)',
-        ExpressionAttributeNames: {
-          '#date': 'date'
-        }
-      })
-    );
-  } catch (error: any) {
-    // If item already exists, that's okay - just ignore the condition failure
-    if (error.name !== 'ConditionalCheckFailedException') {
-      throw error;
-    }
-  }
+  const collection = getActivityCollection();
+  await collection.updateOne(
+    { userId, date: activityDate },
+    {
+      $setOnInsert: item,
+      $set: { updatedAt: timestamp, timestamp },
+    },
+    { upsert: true }
+  );
 
   return item;
 }
@@ -65,23 +62,11 @@ async function getActivityData(userId: string, startDate: string, endDate: strin
     throw new Error('Missing required parameters for getActivityData');
   }
 
-  const result = await ddbDocClient.send(
-    new QueryCommand({
-      TableName: ACTIVITY_TABLE,
-      KeyConditionExpression: 'userId = :userId AND #date BETWEEN :startDate AND :endDate',
-      ExpressionAttributeNames: {
-        '#date': 'date'
-      },
-      ExpressionAttributeValues: {
-        ':userId': userId,
-        ':startDate': startDate,
-        ':endDate': endDate,
-      },
-      ScanIndexForward: false, // Sort by date descending
-    })
-  );
-
-  return (result.Items || []) as ActivityItem[];
+  const collection = getActivityCollection();
+  return collection
+    .find({ userId, date: { $gte: startDate, $lte: endDate } })
+    .sort({ date: -1 })
+    .toArray();
 }
 
 export {

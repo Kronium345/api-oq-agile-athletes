@@ -1,6 +1,4 @@
-import { DeleteCommand, PutCommand } from '@aws-sdk/lib-dynamodb';
 import express, { Response } from 'express';
-import { ddbDocClient } from '../config/ddbClient.js';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
 import {
     getExerciseHistory,
@@ -9,46 +7,63 @@ import {
 } from '../models/exerciseHistory.js';
 import {
     getFavorites,
-    isFavorite
+    isFavorite,
+    toggleFavorite,
 } from '../models/favorites.js';
-
-const FAVORITES_TABLE = process.env.MONGO_FAVORITES_COLLECTION || 'favorites';
 
 const router = express.Router();
 
+function validateHistoryPayload(payload: any): Array<{ field: string; message: string }> {
+  const errors: Array<{ field: string; message: string }> = [];
+
+  if (!payload.exerciseName || typeof payload.exerciseName !== 'string') {
+    errors.push({ field: 'exerciseName', message: 'exerciseName is required and must be a string' });
+  }
+
+  const numericFields = ['sets', 'reps', 'weight', 'duration', 'caloriesBurned', 'calories'];
+  for (const field of numericFields) {
+    if (payload[field] !== undefined && Number.isNaN(Number(payload[field]))) {
+      errors.push({ field, message: `${field} must be a valid number` });
+    }
+  }
+
+  if (payload.notes !== undefined && typeof payload.notes !== 'string') {
+    errors.push({ field: 'notes', message: 'notes must be a string' });
+  }
+
+  return errors;
+}
+
 
 router.post('/history', authenticate, async (req: AuthenticatedRequest, res: Response) => {
-  console.log('=== BACKEND: Exercise History Logging Started ===');
-  console.log('Request headers:', req.headers);
-  console.log('Auth middleware userId:', req.userId);
-  console.log('Request body:', JSON.stringify(req.body, null, 2));
+  console.log('[history] request received', {
+    path: req.path,
+    method: req.method,
+    userId: req.userId,
+  });
   
   try {
     const userId = req.userId;
     const exerciseData = req.body;
 
-    console.log('=== BACKEND: History Validation ===');
-    console.log('UserId from auth:', userId);
-    console.log('Exercise data received:', exerciseData);
-    console.log('Exercise name:', exerciseData.exerciseName);
-
-    if (!exerciseData.exerciseName) {
-      console.log('=== BACKEND: Validation Failed - No exercise name ===');
-      return res.status(400).json({
-        success: false,
-        message: 'exerciseName is required',
-      });
-    }
-
     if (!userId) {
-      console.log('=== BACKEND: Validation Failed - No userId ===');
+      console.log('[history] auth failed - missing userId');
       return res.status(401).json({
         success: false,
         message: 'User authentication failed',
       });
     }
 
-    // Convert setDetails from object to array format (match template)
+    const validationErrors = validateHistoryPayload(exerciseData);
+    if (validationErrors.length > 0) {
+      console.log('[history] validation failed', { userId, validationErrors });
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: validationErrors,
+      });
+    }
+
     let setDetailsArray = null;
     if (exerciseData.setDetails) {
       if (Array.isArray(exerciseData.setDetails)) {
@@ -69,10 +84,15 @@ router.post('/history', authenticate, async (req: AuthenticatedRequest, res: Res
       setDetails: setDetailsArray
     };
 
-    console.log('=== BACKEND: Calling recordExercise ===');
+    console.log('[history] writing exercise log', {
+      userId,
+      exerciseName: processedData.exerciseName,
+    });
     const result = await recordExercise(userId, processedData);
-    console.log('=== BACKEND: Exercise recorded successfully ===');
-    console.log('Result:', result);
+    console.log('[history] exercise logged successfully', {
+      userId,
+      exerciseId: result.exerciseId,
+    });
 
     res.status(201).json({
       success: true,
@@ -80,10 +100,11 @@ router.post('/history', authenticate, async (req: AuthenticatedRequest, res: Res
       data: result,
     });
   } catch (error: any) {
-    console.error('=== BACKEND: Record exercise history error ===');
-    console.error('Error details:', error);
-    console.error('Error message:', error.message);
-    console.error('Error stack:', error.stack);
+    console.error('[history] DB write failed', {
+      path: req.path,
+      userId: req.userId,
+      message: error?.message,
+    });
     
     res.status(500).json({
       success: false,
@@ -124,85 +145,19 @@ router.post('/toggle-favorite', authenticate, async (req: AuthenticatedRequest, 
   try {
     console.log('🔍 Checking existing favorite...');
     const isCurrentlyFavorite = await isFavorite(userId, exerciseName);
-    console.log('Existing favorite found:', isCurrentlyFavorite);
+    const result = await toggleFavorite(userId, exerciseName);
+    const action = result.isFavorite ? 'added' : 'removed';
+    const statusCode = result.isFavorite ? 201 : 200;
 
-    if (isCurrentlyFavorite) {
-      console.log('❌ Removing from favorites...');
-      try {
-        await ddbDocClient.send(
-          new DeleteCommand({
-            TableName: FAVORITES_TABLE,
-            Key: {
-              userId,
-              exerciseName,
-            },
-          })
-        );
-        
-        console.log('✅ Successfully unfavorited:', exerciseName);
-        return res.status(200).json({ 
-          message: 'Exercise unfavorited',
-          action: 'removed',
-          exerciseName,
-          userId
-        });
-      } catch (deleteError: any) {
-        if (deleteError.name === 'ResourceNotFoundException') {
-          console.log('⚠️ Table not found - simulating unfavorite');
-          return res.status(200).json({ 
-            message: 'Exercise unfavorited',
-            action: 'removed',
-            exerciseName,
-            userId,
-            note: 'Simulated - table not configured'
-          });
-        }
-        throw deleteError;
-      }
-      
-    } else {
-      console.log('⭐ Adding to favorites...');
-      const timestamp = new Date().toISOString();
-      const newFavorite = {
-        userId,
-        exerciseName,
-        isFavorite: true,
-        createdAt: timestamp,
-        updatedAt: timestamp,
-      };
-      
-      try {
-        await ddbDocClient.send(
-          new PutCommand({
-            TableName: FAVORITES_TABLE,
-            Item: newFavorite,
-          })
-        );
-        
-        console.log('✅ Successfully favorited:', exerciseName);
-        return res.status(201).json({ 
-          message: 'Exercise favorited', 
-          favorite: newFavorite,
-          action: 'added',
-          exerciseName,
-          userId
-        });
-      } catch (putError: any) {
-        if (putError.name === 'ResourceNotFoundException') {
-          // Table doesn't exist, but pretend we favorited
-          console.log('⚠️ Table not found - simulating favorite');
-          return res.status(201).json({ 
-            message: 'Exercise favorited', 
-            favorite: newFavorite,
-            action: 'added',
-            exerciseName,
-            userId,
-            note: 'Simulated - table not configured'
-          });
-        }
-        throw putError;
-      }
-    }
+    console.log(`✅ Successfully ${action === 'added' ? 'favorited' : 'unfavorited'}:`, exerciseName);
+    return res.status(statusCode).json({
+      message: result.isFavorite ? 'Exercise favorited' : 'Exercise unfavorited',
+      action,
+      exerciseName,
+      userId,
+      previousState: isCurrentlyFavorite,
+      currentState: result.isFavorite,
+    });
     
   } catch (error: any) {
     console.error('❌ BACKEND ERROR:', error);

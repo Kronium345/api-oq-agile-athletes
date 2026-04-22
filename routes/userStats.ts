@@ -8,19 +8,35 @@ import {
 
 const router = express.Router();
 
+function normalizeStatsShape(stats: any) {
+  return {
+    totalWorkouts: Number(stats?.totalWorkouts || 0),
+    totalCalories: Number(stats?.totalCalories || 0),
+    totalMinutes: Number(stats?.totalMinutes || 0),
+  };
+}
 
 router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.userId!;
+    console.log('[user-stats] request received', {
+      path: req.path,
+      method: req.method,
+      userId,
+    });
 
     const stats = await getUserStats(userId);
 
     res.json({
       success: true,
-      data: stats,
+      data: normalizeStatsShape(stats),
     });
   } catch (error: any) {
-    console.error('Get user stats error:', error);
+    console.error('[user-stats] DB read failed', {
+      path: req.path,
+      userId: req.userId,
+      message: error?.message,
+    });
     res.status(500).json({
       success: false,
       message: 'Failed to get user stats',
@@ -37,6 +53,12 @@ router.post('/update', authenticate, async (req: AuthenticatedRequest, res: Resp
   try {
     const userId = req.userId!;
     const { workouts, calories, minutes } = req.body;
+    console.log('[user-stats] update request received', {
+      path: req.path,
+      method: req.method,
+      userId,
+      body: req.body,
+    });
 
     const updates: {
       workouts?: number;
@@ -45,13 +67,41 @@ router.post('/update', authenticate, async (req: AuthenticatedRequest, res: Resp
     } = {};
 
     if (workouts !== undefined) {
-      updates.workouts = Number(workouts);
+      const parsed = Number(workouts);
+      if (Number.isNaN(parsed)) {
+        return res.status(400).json({
+          success: false,
+          message: 'workouts must be a valid number',
+        });
+      }
+      updates.workouts = parsed;
     }
     if (calories !== undefined) {
-      updates.calories = Number(calories);
+      const parsed = Number(calories);
+      if (Number.isNaN(parsed)) {
+        return res.status(400).json({
+          success: false,
+          message: 'calories must be a valid number',
+        });
+      }
+      updates.calories = parsed;
     }
     if (minutes !== undefined) {
-      updates.minutes = Number(minutes);
+      const parsed = Number(minutes);
+      if (Number.isNaN(parsed)) {
+        return res.status(400).json({
+          success: false,
+          message: 'minutes must be a valid number',
+        });
+      }
+      updates.minutes = parsed;
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'At least one of workouts, calories, or minutes is required',
+      });
     }
 
     const updatedStats = await updateUserStats(userId, updates);
@@ -59,10 +109,14 @@ router.post('/update', authenticate, async (req: AuthenticatedRequest, res: Resp
     res.json({
       success: true,
       message: 'Stats updated successfully',
-      data: updatedStats,
+      data: normalizeStatsShape(updatedStats),
     });
   } catch (error: any) {
-    console.error('Update user stats error:', error);
+    console.error('[user-stats] DB write failed', {
+      path: req.path,
+      userId: req.userId,
+      message: error?.message,
+    });
     res.status(500).json({
       success: false,
       message: 'Failed to update user stats',

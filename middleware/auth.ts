@@ -6,17 +6,48 @@ interface AuthenticatedRequest<P = any, ResBody = any, ReqBody = any, ReqQuery =
   userId?: string;
 }
 
+function decodeJwtPayload(token: string): Record<string, any> | null {
+  const parts = token.split('.');
+  if (parts.length !== 3) {
+    return null;
+  }
+
+  try {
+    const payloadBase64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padded = payloadBase64 + '='.repeat((4 - (payloadBase64.length % 4)) % 4);
+    const payloadJson = Buffer.from(padded, 'base64').toString('utf8');
+    return JSON.parse(payloadJson);
+  } catch {
+    return null;
+  }
+}
+
+function resolveUserIdFromToken(token: string): string | null {
+  const jwtPayload = decodeJwtPayload(token);
+  if (jwtPayload) {
+    const jwtUserId =
+      jwtPayload.sub ||
+      jwtPayload.userId ||
+      jwtPayload.user_id ||
+      jwtPayload.uid ||
+      jwtPayload.id;
+
+    if (typeof jwtUserId === 'string' && jwtUserId.trim()) {
+      return jwtUserId.trim();
+    }
+  }
+
+  return token.trim() || null;
+}
+
 async function authenticate(req: AuthenticatedRequest<any, any, any, any>, res: Response, next: NextFunction): Promise<void> {
-  console.log('=== AUTH MIDDLEWARE: Starting authentication ===');
-  console.log('Request headers:', req.headers);
-  console.log('Authorization header:', req.headers.authorization);
+  console.log('[auth] request received', { path: req.path, method: req.method });
   
   try {
     const authHeader = req.headers.authorization;
     
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      console.log('=== AUTH MIDDLEWARE: No valid auth header ===');
-      console.log('Auth header:', authHeader);
+      console.log('[auth] missing or invalid bearer header', { path: req.path });
       res.status(401).json({
         success: false,
         message: 'No token provided',
@@ -25,19 +56,10 @@ async function authenticate(req: AuthenticatedRequest<any, any, any, any>, res: 
     }
 
     const token = authHeader.split(' ')[1];
-    console.log('=== AUTH MIDDLEWARE: Extracted token ===');
-    console.log('Token (first 20 chars):', token ? token.substring(0, 20) + '...' : 'null');
-    
-    // The current implementation treats the token as the userId directly
-    // For now, let's treat the token as the userId directly (this matches our auth system)
-    console.log('=== AUTH MIDDLEWARE: Looking up user by token as userId ===');
-    const user = await getUserById(token);
-    console.log('=== AUTH MIDDLEWARE: User lookup result ===');
-    console.log('User found:', !!user);
-    console.log('User data:', user ? { userId: user.userId, email: user.email } : 'null');
-    
-    if (!user) {
-      console.log('=== AUTH MIDDLEWARE: User not found ===');
+    const resolvedUserId = resolveUserIdFromToken(token);
+
+    if (!resolvedUserId) {
+      console.log('[auth] unable to resolve user id from token', { path: req.path });
       res.status(401).json({
         success: false,
         message: 'Invalid token',
@@ -45,16 +67,27 @@ async function authenticate(req: AuthenticatedRequest<any, any, any, any>, res: 
       return;
     }
 
-    console.log('=== AUTH MIDDLEWARE: Authentication successful ===');
-    console.log('Setting req.userId to:', user.userId);
+    console.log('[auth] resolved user id', { path: req.path, userId: resolvedUserId });
+    const user = await getUserById(resolvedUserId);
+    
+    if (!user) {
+      console.log('[auth] user not found for token', { path: req.path, userId: resolvedUserId });
+      res.status(401).json({
+        success: false,
+        message: 'Invalid token',
+      });
+      return;
+    }
+
+    console.log('[auth] authentication successful', { path: req.path, userId: user.userId });
     req.user = user;
     req.userId = user.userId;
     next();
   } catch (error: any) {
-    console.error('=== AUTH MIDDLEWARE: Error occurred ===');
-    console.error('Auth middleware error:', error);
-    console.error('Error message:', error.message);
-    console.error('Error stack:', error.stack);
+    console.error('[auth] authentication error', {
+      path: req.path,
+      message: error?.message,
+    });
     res.status(401).json({
       success: false,
       message: 'Authentication failed',
