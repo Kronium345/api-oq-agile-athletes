@@ -19,9 +19,6 @@ function buildDefaultStats(userId) {
 function buildInsertDefaults(userId) {
     return {
         userId,
-        totalWorkouts: 0,
-        totalCalories: 0,
-        totalMinutes: 0,
         createdAt: new Date().toISOString(),
     };
 }
