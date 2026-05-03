@@ -1,5 +1,6 @@
 import express, { Request, Response } from 'express';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
+import { deleteAccountByUserId } from '../models/accountDeletion.js';
 import { authenticateUser, createUser, getUserByEmail } from '../models/user.js';
 
 const router = express.Router();
@@ -131,6 +132,21 @@ router.get('/current-user', authenticate, async (req: AuthenticatedRequest, res:
       success: false,
       message: 'Failed to get user',
       error: error.message,
+    });
+  }
+});
+
+
+router.delete('/delete', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+    await deleteAccountByUserId(userId);
+    return res.status(204).send();
+  } catch (error: any) {
+    console.error('Delete account error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to delete account',
     });
   }
 });
