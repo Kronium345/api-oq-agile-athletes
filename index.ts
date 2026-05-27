@@ -4,8 +4,14 @@ import express from 'express';
 import { connectToMongo } from './config/mongoClient.js';
 import { buildDeleteAccountPlayStoreHtml } from './deleteAccountPage.js';
 
+import analyzeFoodRoutes from './routes/analyzeFood.js';
+import aiChatRoutes from './routes/aiChat.js';
 import activityRoutes from './routes/activity.js';
+import caloriePreferencesRoutes from './routes/caloriePreferences.js';
+import foodLogRoutes from './routes/foodLog.js';
+import foodScanRoutes from './routes/foodScan.js';
 import authRoutes from './routes/auth.js';
+import quizRoutes from './routes/quiz.js';
 import exerciseRecognitionRoutes from './routes/exerciseRecognition.js';
 import exercisesRoutes from './routes/exercises.js';
 import favoritesRoutes from './routes/favorites.js';
@@ -18,7 +24,7 @@ const app = express();
 const PORT = process.env.PORT || 4000;
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 app.get('/', (req, res) => {
@@ -35,6 +41,12 @@ app.get('/delete-account', (_req, res) => {
 });
 
 app.use('/auth', authRoutes);
+app.use('/chat', aiChatRoutes);
+app.use('/quiz', quizRoutes);
+app.use('/food', foodLogRoutes);
+app.use('/foodScan', foodScanRoutes);
+app.use('/preferences', caloriePreferencesRoutes);
+app.use('/analyze-food', analyzeFoodRoutes);
 app.use('/api/steps', stepsRoutes);
 app.use('/api/exercises', exercisesRoutes);
 app.use('/api/exercise-recognition', exerciseRecognitionRoutes);

@@ -2,6 +2,7 @@ import cors from 'cors';
 import 'dotenv/config';
 import express from 'express';
 import { connectToMongo } from './config/mongoClient.js';
+import { buildDeleteAccountPlayStoreHtml } from './deleteAccountPage.js';
 import activityRoutes from './routes/activity.js';
 import authRoutes from './routes/auth.js';
 import exerciseRecognitionRoutes from './routes/exerciseRecognition.js';
@@ -21,6 +22,10 @@ app.get('/', (req, res) => {
 });
 app.get('/health', (req, res) => {
     res.json({ status: 'ok', message: 'Server is running' });
+});
+/** Google Play–style public URL: browser GET must return HTML, not JSON. */
+app.get('/delete-account', (_req, res) => {
+    res.type('html').send(buildDeleteAccountPlayStoreHtml());
 });
 app.use('/auth', authRoutes);
 app.use('/api/steps', stepsRoutes);
