@@ -1,5 +1,5 @@
 import express, { Response } from 'express';
-import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
+import { authenticate, AuthenticatedRequest } from '../middleware/auth.ts';
 import {
     getAllExercises,
     getExerciseById,
@@ -8,7 +8,7 @@ import {
     getTotalExerciseDuration,
     recordExercise,
     type ExerciseData,
-} from '../models/exerciseHistory.js';
+} from '../models/exerciseHistory.ts';
 
 const router = express.Router();
 

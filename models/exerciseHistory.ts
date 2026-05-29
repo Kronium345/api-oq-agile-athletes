@@ -1,6 +1,6 @@
 import { Collection } from 'mongodb';
 import { v4 as uuidv4 } from 'uuid';
-import { getMongoClient, getMongoDbName } from '../config/mongoClient.js';
+import { getMongoClient, getMongoDbName } from '../config/mongoClient.ts';
 
 const EXERCISE_HISTORY_TABLE = process.env.MONGO_EXERCISE_HISTORY_COLLECTION || 'exercise_history';
 

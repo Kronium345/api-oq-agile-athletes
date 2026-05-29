@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import type { ClientSession, Db } from 'mongodb';
-import { getMongoClient, getMongoDbName } from '../config/mongoClient.js';
+import { getMongoClient, getMongoDbName } from '../config/mongoClient.ts';
 
 const USERS_TABLE = process.env.MONGO_USERS_COLLECTION || 'users';
 const STEP_HISTORY_TABLE = process.env.MONGO_STEP_HISTORY_COLLECTION || 'step_history';

@@ -4,7 +4,8 @@ import {
   upsertCaloriePreferences,
   type ActivityLevel,
   type MealPreferences,
-} from '../models/caloriePreferences.js';
+} from '../models/caloriePreferences.ts';
+import { routeParam } from '../utils/routeParams.ts';
 
 const router = express.Router();
 
@@ -49,7 +50,7 @@ router.post('/preferences', async (req: Request, res: Response) => {
 
 router.get('/preferences/:userId', async (req: Request, res: Response) => {
   try {
-    const preferences = await getCaloriePreferences(req.params.userId);
+    const preferences = await getCaloriePreferences(routeParam(req.params.userId));
     if (!preferences) {
       return res.status(404).send();
     }

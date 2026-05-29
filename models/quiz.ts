@@ -1,5 +1,5 @@
 import { Collection } from 'mongodb';
-import { getMongoClient, getMongoDbName } from '../config/mongoClient.js';
+import { getMongoClient, getMongoDbName } from '../config/mongoClient.ts';
 
 const QUIZ_QUESTIONS_TABLE = process.env.MONGO_QUIZ_QUESTIONS_COLLECTION || 'quiz_questions';
 const QUIZ_CATEGORIES_TABLE = process.env.MONGO_QUIZ_CATEGORIES_COLLECTION || 'quiz_categories';

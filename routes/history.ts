@@ -1,15 +1,15 @@
 import express, { Response } from 'express';
-import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
+import { authenticate, AuthenticatedRequest } from '../middleware/auth.ts';
 import {
     getExerciseHistory,
     getAllExercises,
     recordExercise,
-} from '../models/exerciseHistory.js';
+} from '../models/exerciseHistory.ts';
 import {
     getFavorites,
     isFavorite,
     toggleFavorite,
-} from '../models/favorites.js';
+} from '../models/favorites.ts';
 
 const router = express.Router();
 

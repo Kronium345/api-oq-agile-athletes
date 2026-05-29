@@ -1,6 +1,6 @@
 import axios from 'axios';
 import express, { Request, Response } from 'express';
-import { analyzeExerciseImage } from '../services/exerciseRecognition.js';
+import { analyzeExerciseImage } from '../services/exerciseRecognition.ts';
 
 const router = express.Router();
 

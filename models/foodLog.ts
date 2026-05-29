@@ -1,6 +1,6 @@
 import { Collection } from 'mongodb';
-import { getMongoClient, getMongoDbName } from '../config/mongoClient.js';
-import { endOfDay, parseYyyyMmDd, startOfDay } from '../utils/dateRanges.js';
+import { getMongoClient, getMongoDbName } from '../config/mongoClient.ts';
+import { endOfDay, parseYyyyMmDd, startOfDay } from '../utils/dateRanges.ts';
 
 const FOOD_LOG_TABLE = process.env.MONGO_FOOD_LOG_COLLECTION || 'food_logs';
 

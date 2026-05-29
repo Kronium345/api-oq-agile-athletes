@@ -5,7 +5,7 @@ import {
   analyzeImage,
   foodKeywords,
   nutrientsWithAliases,
-} from '../services/foodService.js';
+} from '../services/foodService.ts';
 
 const router = express.Router();
 

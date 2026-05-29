@@ -1,10 +1,10 @@
 import express, { Response } from 'express';
-import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
+import { authenticate, AuthenticatedRequest } from '../middleware/auth.ts';
 import {
     getUserStats,
     resetUserStats,
     updateUserStats,
-} from '../models/userStats.js';
+} from '../models/userStats.ts';
 
 const router = express.Router();
 

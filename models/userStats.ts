@@ -1,5 +1,5 @@
 import { Collection } from 'mongodb';
-import { getMongoClient, getMongoDbName } from '../config/mongoClient.js';
+import { getMongoClient, getMongoDbName } from '../config/mongoClient.ts';
 
 const USER_STATS_TABLE = process.env.MONGO_USER_STATS_COLLECTION || 'user_stats';
 

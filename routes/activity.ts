@@ -1,6 +1,6 @@
 import express, { Response } from 'express';
-import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
-import { getActivityData, recordActivity } from '../models/activity.js';
+import { authenticate, AuthenticatedRequest } from '../middleware/auth.ts';
+import { getActivityData, recordActivity } from '../models/activity.ts';
 
 const router = express.Router();
 

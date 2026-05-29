@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { Collection } from 'mongodb';
 import { v4 as uuidv4 } from 'uuid';
-import { getMongoClient, getMongoDbName } from '../config/mongoClient.js';
+import { getMongoClient, getMongoDbName } from '../config/mongoClient.ts';
 
 const USERS_TABLE = process.env.MONGO_USERS_COLLECTION || 'users';
 

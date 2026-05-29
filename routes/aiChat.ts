@@ -7,7 +7,8 @@ import {
   getChatsByUserId,
   saveChat,
   type ChatMessage,
-} from '../models/aiChat.js';
+} from '../models/aiChat.ts';
+import { routeParam } from '../utils/routeParams.ts';
 
 const router = express.Router();
 
@@ -40,7 +41,7 @@ router.post('/save-chat', async (req: Request, res: Response) => {
 });
 
 router.get('/get-chat/:userId', async (req: Request, res: Response) => {
-  const { userId } = req.params;
+  const userId = routeParam(req.params.userId);
 
   try {
     const chats = await getChatsByUserId(userId);
@@ -54,7 +55,7 @@ router.get('/get-chat/:userId', async (req: Request, res: Response) => {
 
 router.delete('/delete-chat/:chatId', async (req: Request, res: Response) => {
   try {
-    const { chatId } = req.params;
+    const chatId = routeParam(req.params.chatId);
 
     if (!ObjectId.isValid(chatId)) {
       return res.status(400).json({ error: 'Invalid chat ID format' });
@@ -137,7 +138,7 @@ router.post('/generate', async (req: Request, res: Response) => {
 });
 
 router.get('/get-chat-by-id/:chatId', async (req: Request, res: Response) => {
-  const { chatId } = req.params;
+  const chatId = routeParam(req.params.chatId);
 
   try {
     if (!ObjectId.isValid(chatId)) {

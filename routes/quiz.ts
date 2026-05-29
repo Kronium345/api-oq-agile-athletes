@@ -1,6 +1,6 @@
 import express, { Request, Response } from 'express';
-import { getCategoryByName, getAllQuestions, insertCategories, insertQuestions } from '../models/quiz.js';
-import { getPrediction } from '../utils/mentalClassifier.js';
+import { getCategoryByName, getAllQuestions, insertCategories, insertQuestions } from '../models/quiz.ts';
+import { getPrediction } from '../utils/mentalClassifier.ts';
 
 const router = express.Router();
 

@@ -1,6 +1,7 @@
 import express, { Request, Response } from 'express';
-import { addCaloriesToDailyIntake } from '../models/caloriePreferences.js';
-import { createFoodLog, getFoodLogsByUserId, serializeLog } from '../models/foodLog.js';
+import { addCaloriesToDailyIntake } from '../models/caloriePreferences.ts';
+import { createFoodLog, getFoodLogsByUserId, serializeLog } from '../models/foodLog.ts';
+import { routeParam } from '../utils/routeParams.ts';
 
 const router = express.Router();
 
@@ -45,7 +46,7 @@ router.get('/log/:userId', async (req: Request, res: Response) => {
   try {
     const dateParam =
       typeof req.query.date === 'string' ? req.query.date : undefined;
-    const foodLog = await getFoodLogsByUserId(req.params.userId, dateParam);
+    const foodLog = await getFoodLogsByUserId(routeParam(req.params.userId), dateParam);
 
     return res.send(foodLog.map((entry) => serializeLog(entry as typeof entry & { _id?: unknown })));
   } catch (error: unknown) {

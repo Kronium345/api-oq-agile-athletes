@@ -1,5 +1,5 @@
 import { Collection } from 'mongodb';
-import { getMongoClient, getMongoDbName } from '../config/mongoClient.js';
+import { getMongoClient, getMongoDbName } from '../config/mongoClient.ts';
 
 const CALORIE_PREFERENCES_TABLE =
   process.env.MONGO_CALORIE_PREFERENCES_COLLECTION || 'calorie_preferences';

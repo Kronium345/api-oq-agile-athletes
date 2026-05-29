@@ -1,6 +1,6 @@
 import { Collection, ObjectId } from 'mongodb';
-import { getMongoClient, getMongoDbName } from '../config/mongoClient.js';
-import type { FoodItemWithNutrition } from '../services/foodService.js';
+import { getMongoClient, getMongoDbName } from '../config/mongoClient.ts';
+import type { FoodItemWithNutrition } from '../services/foodService.ts';
 
 const FOOD_SCAN_TABLE = process.env.MONGO_FOOD_SCAN_COLLECTION || 'food_scans';
 

@@ -1,5 +1,5 @@
 import { NextFunction, Request, Response } from 'express';
-import { getUserById } from '../models/user.js';
+import { getUserById } from '../models/user.ts';
 
 interface AuthenticatedRequest<P = any, ResBody = any, ReqBody = any, ReqQuery = any> extends Request<P, ResBody, ReqBody, ReqQuery> {
   user?: any;

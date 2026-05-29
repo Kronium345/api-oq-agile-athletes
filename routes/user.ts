@@ -2,8 +2,8 @@ import express, { Response } from 'express';
 import fs from 'fs';
 import multer from 'multer';
 import path from 'path';
-import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
-import { getUserById, updateUser, type UpdateUserParams } from '../models/user.js';
+import { authenticate, AuthenticatedRequest } from '../middleware/auth.ts';
+import { getUserById, updateUser, type UpdateUserParams } from '../models/user.ts';
 
 const router = express.Router();
 

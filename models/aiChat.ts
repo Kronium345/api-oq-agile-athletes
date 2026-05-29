@@ -1,5 +1,5 @@
 import { Collection, ObjectId } from 'mongodb';
-import { getMongoClient, getMongoDbName } from '../config/mongoClient.js';
+import { getMongoClient, getMongoDbName } from '../config/mongoClient.ts';
 
 const AI_CHAT_TABLE = process.env.MONGO_AI_CHAT_COLLECTION || 'ai_chats';
 

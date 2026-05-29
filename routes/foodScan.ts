@@ -7,13 +7,13 @@ import {
   getFoodScanById,
   getFoodScansByUserId,
   serializeScan,
-} from '../models/foodScan.js';
+} from '../models/foodScan.ts';
 import {
   analyzeImage,
   foodKeywords,
   nutrientsWithAliases,
   type FoodItemWithNutrition,
-} from '../services/foodService.js';
+} from '../services/foodService.ts';
 import {
   endOfDay,
   endOfMonth,
@@ -23,7 +23,8 @@ import {
   startOfDay,
   startOfMonth,
   startOfWeek,
-} from '../utils/dateRanges.js';
+} from '../utils/dateRanges.ts';
+import { routeParam } from '../utils/routeParams.ts';
 
 const router = express.Router();
 
@@ -88,8 +89,8 @@ router.post('/analyze', async (req: Request, res: Response) => {
 
 router.get('/scans/month/:year/:month', async (req: Request, res: Response) => {
   try {
-    const year = Number(req.params.year);
-    const month = Number(req.params.month);
+    const year = Number(routeParam(req.params.year));
+    const month = Number(routeParam(req.params.month));
     if (!year || !month || month < 1 || month > 12) {
       return res.status(400).json({ message: 'Invalid year or month' });
     }
@@ -140,7 +141,7 @@ router.get('/scans/today', async (req: Request, res: Response) => {
 
 router.get('/scans/date/:date', async (req: Request, res: Response) => {
   try {
-    const day = parseYyyyMmDd(req.params.date);
+    const day = parseYyyyMmDd(routeParam(req.params.date));
     if (!day) {
       return res.status(400).json({ message: 'Invalid date format. Use YYYY-MM-DD' });
     }
@@ -181,7 +182,7 @@ router.get('/scans/last-three-days', async (req: Request, res: Response) => {
 
 router.get('/:userId', async (req: Request, res: Response) => {
   try {
-    const scans = await getFoodScansByUserId(req.params.userId);
+    const scans = await getFoodScansByUserId(routeParam(req.params.userId));
     return res.json(scans.map((s) => mapScanForResponse(s)));
   } catch (error: unknown) {
     const err = error as Error;
@@ -191,11 +192,14 @@ router.get('/:userId', async (req: Request, res: Response) => {
 
 router.get('/:userId/:id', async (req: Request, res: Response) => {
   try {
-    if (!ObjectId.isValid(req.params.id)) {
+    const userId = routeParam(req.params.userId);
+    const id = routeParam(req.params.id);
+
+    if (!ObjectId.isValid(id)) {
       return res.status(400).json({ message: 'Invalid scan ID' });
     }
 
-    const scan = await getFoodScanById(req.params.userId, req.params.id);
+    const scan = await getFoodScanById(userId, id);
     if (!scan) {
       return res.status(404).json({ message: 'Food scan not found' });
     }
@@ -209,11 +213,14 @@ router.get('/:userId/:id', async (req: Request, res: Response) => {
 
 router.delete('/:userId/:id', async (req: Request, res: Response) => {
   try {
-    if (!ObjectId.isValid(req.params.id)) {
+    const userId = routeParam(req.params.userId);
+    const id = routeParam(req.params.id);
+
+    if (!ObjectId.isValid(id)) {
       return res.status(400).json({ message: 'Invalid scan ID' });
     }
 
-    const deleted = await deleteFoodScan(req.params.userId, req.params.id);
+    const deleted = await deleteFoodScan(userId, id);
     if (!deleted) {
       return res.status(404).json({ message: 'Food scan not found' });
     }

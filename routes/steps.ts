@@ -1,12 +1,12 @@
 import express, { Response } from 'express';
-import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
+import { authenticate, AuthenticatedRequest } from '../middleware/auth.ts';
 import {
     getStepHistory,
     getStepsByDate,
     getTotalSteps,
     recordSteps,
     updateSteps,
-} from '../models/stepHistory.js';
+} from '../models/stepHistory.ts';
 
 const router = express.Router();
 

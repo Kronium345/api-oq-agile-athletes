@@ -1,5 +1,5 @@
 import { Collection } from 'mongodb';
-import { getMongoClient, getMongoDbName } from '../config/mongoClient.js';
+import { getMongoClient, getMongoDbName } from '../config/mongoClient.ts';
 
 const FAVORITES_TABLE = process.env.MONGO_FAVORITES_COLLECTION || 'favorites';
 
