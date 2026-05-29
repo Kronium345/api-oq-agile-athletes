@@ -1,7 +1,36 @@
 import express from 'express';
-import { authenticate } from '../middleware/auth.js';
-import { getStepHistory, getStepsByDate, getTotalSteps, recordSteps, updateSteps, } from '../models/stepHistory.js';
+import { authenticate } from "../middleware/auth.js";
+import { getStepHistory, getStepsByDate, getTotalSteps, recordSteps, updateSteps, } from "../models/stepHistory.js";
+import { getLeaderboard } from "../services/stepsSocial.js";
+import { routeParam } from "../utils/routeParams.js";
 const router = express.Router();
+function parseLeaderboardPeriod(value) {
+    if (value === 'streaks' || value === 'today' || value === 'week')
+        return value;
+    return 'today';
+}
+function parseLeaderboardScope(value) {
+    if (value === 'all' || value === 'friends')
+        return value;
+    return 'friends';
+}
+router.get('/leaderboard', authenticate, async (req, res) => {
+    try {
+        const period = parseLeaderboardPeriod(req.query.period);
+        const scope = parseLeaderboardScope(req.query.scope);
+        const limitRaw = req.query.limit;
+        const limit = typeof limitRaw === 'string' && Number(limitRaw) > 0
+            ? Math.min(Number(limitRaw), 100)
+            : 12;
+        const { entries } = await getLeaderboard(req.userId, period, scope, limit);
+        return res.json({ success: true, period, entries });
+    }
+    catch (error) {
+        const err = error;
+        console.error('Leaderboard error:', err);
+        return res.status(500).json({ success: false, message: 'Failed to fetch leaderboard' });
+    }
+});
 router.post('/', authenticate, async (req, res) => {
     try {
         const { date, stepCount } = req.body;
@@ -40,7 +69,7 @@ router.post('/', authenticate, async (req, res) => {
  */
 router.get('/date/:date', authenticate, async (req, res) => {
     try {
-        const { date } = req.params;
+        const date = routeParam(req.params.date);
         const userId = req.userId;
         const steps = await getStepsByDate(userId, date);
         const stepCount = steps?.stepCount ?? 0;
@@ -113,7 +142,7 @@ router.get('/total', authenticate, async (req, res) => {
  */
 router.put('/:date', authenticate, async (req, res) => {
     try {
-        const { date } = req.params;
+        const date = routeParam(req.params.date);
         const { stepCount } = req.body;
         const userId = req.userId;
         if (stepCount === undefined) {

@@ -1,4 +1,4 @@
-import { getMongoClient, getMongoDbName } from '../config/mongoClient.js';
+import { getMongoClient, getMongoDbName } from "../config/mongoClient.js";
 const STEP_HISTORY_TABLE = process.env.MONGO_STEP_HISTORY_COLLECTION || 'step_history';
 function getStepHistoryCollection() {
     const client = getMongoClient();
@@ -52,6 +52,17 @@ async function getTotalSteps(userId, startDate = null, endDate = null) {
 /**
  * Update step count for a specific date
  */
+async function getStepHistoryForUsers(userIds, startDate, endDate) {
+    if (!userIds.length)
+        return [];
+    const collection = getStepHistoryCollection();
+    return collection
+        .find({
+        userId: { $in: userIds },
+        date: { $gte: startDate, $lte: endDate },
+    })
+        .toArray();
+}
 async function updateSteps(userId, date, stepCount) {
     const collection = getStepHistoryCollection();
     await collection.updateOne({ userId, date }, {
@@ -60,4 +71,4 @@ async function updateSteps(userId, date, stepCount) {
     }, { upsert: true });
     return getStepsByDate(userId, date);
 }
-export { getStepHistory, getStepsByDate, getTotalSteps, recordSteps, updateSteps };
+export { getStepHistory, getStepHistoryForUsers, getStepsByDate, getTotalSteps, recordSteps, updateSteps };

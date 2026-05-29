@@ -1,6 +1,6 @@
 import express from 'express';
-import { authenticate } from '../middleware/auth.js';
-import { getAllExercises, getExerciseById, getExerciseHistory, getTotalCaloriesBurned, getTotalExerciseDuration, recordExercise, } from '../models/exerciseHistory.js';
+import { authenticate } from "../middleware/auth.js";
+import { getAllExercises, getExerciseById, getExerciseHistory, getTotalCaloriesBurned, getTotalExerciseDuration, recordExercise, } from "../models/exerciseHistory.js";
 const router = express.Router();
 router.post('/', authenticate, async (req, res) => {
     console.log('=== BACKEND: Exercise Recording Started ===');

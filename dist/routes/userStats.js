@@ -1,6 +1,6 @@
 import express from 'express';
-import { authenticate } from '../middleware/auth.js';
-import { getUserStats, resetUserStats, updateUserStats, } from '../models/userStats.js';
+import { authenticate } from "../middleware/auth.js";
+import { getUserStats, resetUserStats, updateUserStats, } from "../models/userStats.js";
 const router = express.Router();
 function normalizeStatsShape(stats) {
     return {

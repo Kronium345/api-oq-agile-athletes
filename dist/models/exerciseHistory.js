@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { getMongoClient, getMongoDbName } from '../config/mongoClient.js';
+import { getMongoClient, getMongoDbName } from "../config/mongoClient.js";
 const EXERCISE_HISTORY_TABLE = process.env.MONGO_EXERCISE_HISTORY_COLLECTION || 'exercise_history';
 function getExerciseHistoryCollection() {
     const client = getMongoClient();

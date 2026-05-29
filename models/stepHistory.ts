@@ -75,6 +75,21 @@ async function getTotalSteps(userId: string, startDate: string | null = null, en
 /**
  * Update step count for a specific date
  */
+async function getStepHistoryForUsers(
+  userIds: string[],
+  startDate: string,
+  endDate: string
+): Promise<StepHistoryItem[]> {
+  if (!userIds.length) return [];
+  const collection = getStepHistoryCollection();
+  return collection
+    .find({
+      userId: { $in: userIds },
+      date: { $gte: startDate, $lte: endDate },
+    })
+    .toArray();
+}
+
 async function updateSteps(userId: string, date: string, stepCount: number | string): Promise<StepHistoryItem | null> {
   const collection = getStepHistoryCollection();
   await collection.updateOne(
@@ -91,6 +106,7 @@ async function updateSteps(userId: string, date: string, stepCount: number | str
 
 export {
     getStepHistory,
+    getStepHistoryForUsers,
     getStepsByDate,
     getTotalSteps,
     recordSteps,

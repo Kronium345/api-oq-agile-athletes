@@ -1,6 +1,6 @@
 import axios from 'axios';
 import express from 'express';
-import { analyzeExerciseImage } from '../services/exerciseRecognition.js';
+import { analyzeExerciseImage } from "../services/exerciseRecognition.js";
 const router = express.Router();
 router.post('/enhance', async (req, res) => {
     console.log('🏋️ EXERCISE ENHANCEMENT REQUEST RECEIVED');

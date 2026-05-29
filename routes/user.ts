@@ -4,6 +4,14 @@ import multer from 'multer';
 import path from 'path';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.ts';
 import { getUserById, updateUser, type UpdateUserParams } from '../models/user.ts';
+import {
+  addFriendship,
+  getFriendsList,
+  getSuggestions,
+  removeFriendship,
+  updateStepSharing,
+} from '../services/stepsSocial.ts';
+import { routeParam } from '../utils/routeParams.ts';
 
 const router = express.Router();
 
@@ -50,10 +58,88 @@ const upload = multer({
   }
 });
 
+router.get('/suggestions', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const limitRaw = req.query.limit;
+    const limit =
+      typeof limitRaw === 'string' && Number(limitRaw) > 0
+        ? Math.min(Number(limitRaw), 50)
+        : 20;
+    const users = await getSuggestions(req.userId!, limit);
+    return res.json({ success: true, users });
+  } catch (error: unknown) {
+    const err = error as Error;
+    console.error('Get suggestions error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to fetch suggestions' });
+  }
+});
+
+router.get('/friends', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const friends = await getFriendsList(req.userId!);
+    return res.json({ success: true, friends });
+  } catch (error: unknown) {
+    const err = error as Error;
+    console.error('Get friends error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to fetch friends' });
+  }
+});
+
+router.post('/friends/:friendUserId', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const friendUserId = routeParam(req.params.friendUserId);
+    const result = await addFriendship(req.userId!, friendUserId);
+    if (!result.ok) {
+      return res.status(result.status).json({ success: false, message: result.message });
+    }
+    return res.status(result.status).json({ success: true, friendUserId: result.friendUserId });
+  } catch (error: unknown) {
+    const err = error as Error;
+    console.error('Add friend error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to add friend' });
+  }
+});
+
+router.delete('/friends/:friendUserId', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const friendUserId = routeParam(req.params.friendUserId);
+    const result = await removeFriendship(req.userId!, friendUserId);
+    if (!result.ok) {
+      return res.status(result.status).json({ success: false, message: result.message });
+    }
+    return res.json({ success: true });
+  } catch (error: unknown) {
+    const err = error as Error;
+    console.error('Remove friend error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to remove friend' });
+  }
+});
+
+router.put('/step-sharing', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { shareStepsEnabled } = req.body as { shareStepsEnabled?: boolean };
+    if (typeof shareStepsEnabled !== 'boolean') {
+      return res.status(400).json({
+        success: false,
+        message: 'shareStepsEnabled (boolean) is required',
+      });
+    }
+    const result = await updateStepSharing(req.userId!, shareStepsEnabled);
+    if (!result.ok) {
+      return res.status(result.status).json({ success: false, message: result.message });
+    }
+    return res.json({ success: true, shareStepsEnabled: result.shareStepsEnabled });
+  } catch (error: unknown) {
+    const err = error as Error;
+    console.error('Update step sharing error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to update step sharing' });
+  }
+});
+
 // Get user profile
 router.get('/:userId', authenticate, async (req: AuthenticatedRequest<UserParams>, res: Response) => {
   try {
-    const { userId } = req.params;
+    const userId = routeParam(req.params.userId);
 
     // Verify user can access this profile
     if (userId !== req.userId) {
@@ -89,7 +175,7 @@ router.get('/:userId', authenticate, async (req: AuthenticatedRequest<UserParams
 // Update user profile
 router.put('/:userId', authenticate, async (req: AuthenticatedRequest<UserParams, {}, UpdateUserParams>, res: Response) => {
   try {
-    const { userId } = req.params;
+    const userId = routeParam(req.params.userId);
     const updateData = { ...req.body };
 
     // Verify user can update this profile
@@ -132,7 +218,7 @@ router.put('/:userId', authenticate, async (req: AuthenticatedRequest<UserParams
 // Upload avatar
 router.put('/:userId/avatar', authenticate, upload.single('avatar'), async (req: MulterRequest, res: Response) => {
   try {
-    const { userId } = req.params;
+    const userId = routeParam(req.params.userId);
 
     // Verify user can update this profile
     if (userId !== req.userId) {

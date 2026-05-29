@@ -7,8 +7,20 @@ import {
     recordSteps,
     updateSteps,
 } from '../models/stepHistory.ts';
+import { getLeaderboard, type LeaderboardPeriod, type LeaderboardScope } from '../services/stepsSocial.ts';
+import { routeParam } from '../utils/routeParams.ts';
 
 const router = express.Router();
+
+function parseLeaderboardPeriod(value: unknown): LeaderboardPeriod {
+  if (value === 'streaks' || value === 'today' || value === 'week') return value;
+  return 'today';
+}
+
+function parseLeaderboardScope(value: unknown): LeaderboardScope {
+  if (value === 'all' || value === 'friends') return value;
+  return 'friends';
+}
 
 interface StepsRequestBody {
   date: string;
@@ -27,6 +39,25 @@ interface StepsQuery {
   startDate?: string;
   endDate?: string;
 }
+
+router.get('/leaderboard', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const period = parseLeaderboardPeriod(req.query.period);
+    const scope = parseLeaderboardScope(req.query.scope);
+    const limitRaw = req.query.limit;
+    const limit =
+      typeof limitRaw === 'string' && Number(limitRaw) > 0
+        ? Math.min(Number(limitRaw), 100)
+        : 12;
+
+    const { entries } = await getLeaderboard(req.userId!, period, scope, limit);
+    return res.json({ success: true, period, entries });
+  } catch (error: unknown) {
+    const err = error as Error;
+    console.error('Leaderboard error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to fetch leaderboard' });
+  }
+});
 
 router.post('/', authenticate, async (req: AuthenticatedRequest<{}, {}, StepsRequestBody>, res: Response) => {
   try {
@@ -70,7 +101,7 @@ router.post('/', authenticate, async (req: AuthenticatedRequest<{}, {}, StepsReq
  */
 router.get('/date/:date', authenticate, async (req: AuthenticatedRequest<StepsParams>, res: Response) => {
   try {
-    const { date } = req.params;
+    const date = routeParam(req.params.date);
     const userId = req.userId!;
 
     const steps = await getStepsByDate(userId, date);
@@ -154,7 +185,7 @@ router.get('/total', authenticate, async (req: AuthenticatedRequest<{}, {}, {}, 
  */
 router.put('/:date', authenticate, async (req: AuthenticatedRequest<StepsParams, {}, UpdateStepsRequestBody>, res: Response) => {
   try {
-    const { date } = req.params;
+    const date = routeParam(req.params.date);
     const { stepCount } = req.body;
     const userId = req.userId!;
 

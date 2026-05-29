@@ -1,12 +1,17 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { getMongoClient, getMongoDbName } from '../config/mongoClient.js';
+import { getMongoClient, getMongoDbName } from "../config/mongoClient.js";
 const USERS_TABLE = process.env.MONGO_USERS_COLLECTION || 'users';
 const STEP_HISTORY_TABLE = process.env.MONGO_STEP_HISTORY_COLLECTION || 'step_history';
 const ACTIVITY_TABLE = process.env.MONGO_ACTIVITY_COLLECTION || 'user_activity';
 const EXERCISE_HISTORY_TABLE = process.env.MONGO_EXERCISE_HISTORY_COLLECTION || 'exercise_history';
 const FAVORITES_TABLE = process.env.MONGO_FAVORITES_COLLECTION || 'favorites';
 const USER_STATS_TABLE = process.env.MONGO_USER_STATS_COLLECTION || 'user_stats';
+const AI_CHAT_TABLE = process.env.MONGO_AI_CHAT_COLLECTION || 'ai_chats';
+const FOOD_SCAN_TABLE = process.env.MONGO_FOOD_SCAN_COLLECTION || 'food_scans';
+const FOOD_LOG_TABLE = process.env.MONGO_FOOD_LOG_COLLECTION || 'food_logs';
+const CALORIE_PREFERENCES_TABLE = process.env.MONGO_CALORIE_PREFERENCES_COLLECTION || 'calorie_preferences';
+const USER_FRIENDS_TABLE = process.env.MONGO_USER_FRIENDS_COLLECTION || 'user_friends';
 function isTransactionUnsupportedError(error) {
     const err = error;
     const msg = typeof err.message === 'string' ? err.message.toLowerCase() : '';
@@ -42,6 +47,11 @@ async function deleteUserOwnedDocuments(db, userId, session) {
     await db.collection(EXERCISE_HISTORY_TABLE).deleteMany({ userId }, opts);
     await db.collection(FAVORITES_TABLE).deleteMany({ userId }, opts);
     await db.collection(USER_STATS_TABLE).deleteMany({ userId }, opts);
+    await db.collection(AI_CHAT_TABLE).deleteMany({ userId }, opts);
+    await db.collection(FOOD_SCAN_TABLE).deleteMany({ userId }, opts);
+    await db.collection(FOOD_LOG_TABLE).deleteMany({ userId }, opts);
+    await db.collection(CALORIE_PREFERENCES_TABLE).deleteMany({ userId }, opts);
+    await db.collection(USER_FRIENDS_TABLE).deleteMany({ $or: [{ userId }, { friendUserId: userId }] }, opts);
     await db.collection(USERS_TABLE).deleteOne({ userId }, opts);
 }
 /**

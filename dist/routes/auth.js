@@ -1,7 +1,7 @@
 import express from 'express';
-import { authenticate } from '../middleware/auth.js';
-import { deleteAccountByUserId } from '../models/accountDeletion.js';
-import { authenticateUser, createUser, getUserByEmail } from '../models/user.js';
+import { authenticate } from "../middleware/auth.js";
+import { deleteAccountByUserId } from "../models/accountDeletion.js";
+import { authenticateUser, createUser, getUserByEmail } from "../models/user.js";
 const router = express.Router();
 router.post('/signup', async (req, res) => {
     try {

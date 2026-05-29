@@ -1,6 +1,6 @@
 import express from 'express';
-import { authenticate } from '../middleware/auth.js';
-import { getFavorites, toggleFavorite } from '../models/favorites.js';
+import { authenticate } from "../middleware/auth.js";
+import { getFavorites, toggleFavorite } from "../models/favorites.js";
 const router = express.Router();
 router.post('/toggle', authenticate, async (req, res) => {
     try {

@@ -57,6 +57,7 @@ async function createUser({ name, email, password }: CreateUserParams): Promise<
     email,
     name,
     password: hashedPassword,
+    shareStepsEnabled: true,
     createdAt,
     updatedAt: createdAt,
   };
@@ -113,6 +114,43 @@ async function authenticateUser(email: string, password: string): Promise<AuthRe
 /**
  * Update user
  */
+async function getUsersByIds(userIds: string[]): Promise<UserWithoutPassword[]> {
+  if (!userIds.length) return [];
+  const usersCollection = getUsersCollection();
+  const users = await usersCollection
+    .find({ userId: { $in: userIds } })
+    .project({ password: 0 })
+    .toArray();
+  return users as UserWithoutPassword[];
+}
+
+async function listUserSuggestions(
+  excludeUserIds: string[],
+  limit: number
+): Promise<UserWithoutPassword[]> {
+  const usersCollection = getUsersCollection();
+  const users = await usersCollection
+    .find({ userId: { $nin: excludeUserIds } })
+    .project({ password: 0, email: 0 })
+    .sort({ name: 1, createdAt: -1 })
+    .limit(limit)
+    .toArray();
+  return users as UserWithoutPassword[];
+}
+
+async function listUsersWithStepSharing(limit: number): Promise<UserWithoutPassword[]> {
+  const usersCollection = getUsersCollection();
+  const users = await usersCollection
+    .find({
+      $or: [{ shareStepsEnabled: true }, { shareStepsEnabled: { $exists: false } }],
+    })
+    .project({ password: 0, email: 0 })
+    .sort({ name: 1 })
+    .limit(limit)
+    .toArray();
+  return users as UserWithoutPassword[];
+}
+
 async function updateUser(userId: string, updates: UpdateUserParams): Promise<UserWithoutPassword | null> {
   const usersCollection = getUsersCollection();
   const updateDoc = {
@@ -130,6 +168,9 @@ export {
     createUser,
     getUserByEmail,
     getUserById,
+    getUsersByIds,
+    listUserSuggestions,
+    listUsersWithStepSharing,
     updateUser, type AuthResult, type CreateUserParams, type UpdateUserParams,
     // Export types
     type User,

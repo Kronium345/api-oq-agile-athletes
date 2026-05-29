@@ -1,4 +1,4 @@
-import { getMongoClient, getMongoDbName } from '../config/mongoClient.js';
+import { getMongoClient, getMongoDbName } from "../config/mongoClient.js";
 const USER_STATS_TABLE = process.env.MONGO_USER_STATS_COLLECTION || 'user_stats';
 function getUserStatsCollection() {
     const client = getMongoClient();

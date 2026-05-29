@@ -14,6 +14,7 @@ const FOOD_SCAN_TABLE = process.env.MONGO_FOOD_SCAN_COLLECTION || 'food_scans';
 const FOOD_LOG_TABLE = process.env.MONGO_FOOD_LOG_COLLECTION || 'food_logs';
 const CALORIE_PREFERENCES_TABLE =
   process.env.MONGO_CALORIE_PREFERENCES_COLLECTION || 'calorie_preferences';
+const USER_FRIENDS_TABLE = process.env.MONGO_USER_FRIENDS_COLLECTION || 'user_friends';
 
 function isTransactionUnsupportedError(error: unknown): boolean {
   const err = error as { code?: number; codeName?: string; message?: string };
@@ -50,6 +51,10 @@ async function deleteUserOwnedDocuments(db: Db, userId: string, session?: Client
   await db.collection(FOOD_SCAN_TABLE).deleteMany({ userId }, opts);
   await db.collection(FOOD_LOG_TABLE).deleteMany({ userId }, opts);
   await db.collection(CALORIE_PREFERENCES_TABLE).deleteMany({ userId }, opts);
+  await db.collection(USER_FRIENDS_TABLE).deleteMany(
+    { $or: [{ userId }, { friendUserId: userId }] },
+    opts
+  );
   await db.collection(USERS_TABLE).deleteOne({ userId }, opts);
 }
 

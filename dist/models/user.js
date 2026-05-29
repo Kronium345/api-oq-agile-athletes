@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs';
 import { v4 as uuidv4 } from 'uuid';
-import { getMongoClient, getMongoDbName } from '../config/mongoClient.js';
+import { getMongoClient, getMongoDbName } from "../config/mongoClient.js";
 const USERS_TABLE = process.env.MONGO_USERS_COLLECTION || 'users';
 function getUsersCollection() {
     const client = getMongoClient();
@@ -17,6 +17,7 @@ async function createUser({ name, email, password }) {
         email,
         name,
         password: hashedPassword,
+        shareStepsEnabled: true,
         createdAt,
         updatedAt: createdAt,
     };
@@ -62,6 +63,38 @@ async function authenticateUser(email, password) {
 /**
  * Update user
  */
+async function getUsersByIds(userIds) {
+    if (!userIds.length)
+        return [];
+    const usersCollection = getUsersCollection();
+    const users = await usersCollection
+        .find({ userId: { $in: userIds } })
+        .project({ password: 0 })
+        .toArray();
+    return users;
+}
+async function listUserSuggestions(excludeUserIds, limit) {
+    const usersCollection = getUsersCollection();
+    const users = await usersCollection
+        .find({ userId: { $nin: excludeUserIds } })
+        .project({ password: 0, email: 0 })
+        .sort({ name: 1, createdAt: -1 })
+        .limit(limit)
+        .toArray();
+    return users;
+}
+async function listUsersWithStepSharing(limit) {
+    const usersCollection = getUsersCollection();
+    const users = await usersCollection
+        .find({
+        $or: [{ shareStepsEnabled: true }, { shareStepsEnabled: { $exists: false } }],
+    })
+        .project({ password: 0, email: 0 })
+        .sort({ name: 1 })
+        .limit(limit)
+        .toArray();
+    return users;
+}
 async function updateUser(userId, updates) {
     const usersCollection = getUsersCollection();
     const updateDoc = {
@@ -71,4 +104,4 @@ async function updateUser(userId, updates) {
     await usersCollection.updateOne({ userId }, { $set: updateDoc });
     return getUserById(userId);
 }
-export { authenticateUser, createUser, getUserByEmail, getUserById, updateUser };
+export { authenticateUser, createUser, getUserByEmail, getUserById, getUsersByIds, listUserSuggestions, listUsersWithStepSharing, updateUser };

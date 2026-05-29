@@ -1,7 +1,7 @@
 import express from 'express';
-import { authenticate } from '../middleware/auth.js';
-import { getAllExercises, recordExercise, } from '../models/exerciseHistory.js';
-import { getFavorites, isFavorite, toggleFavorite, } from '../models/favorites.js';
+import { authenticate } from "../middleware/auth.js";
+import { getAllExercises, recordExercise, } from "../models/exerciseHistory.js";
+import { getFavorites, isFavorite, toggleFavorite, } from "../models/favorites.js";
 const router = express.Router();
 function validateHistoryPayload(payload) {
     const errors = [];

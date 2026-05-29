@@ -1,4 +1,4 @@
-import { getMongoClient, getMongoDbName } from '../config/mongoClient.js';
+import { getMongoClient, getMongoDbName } from "../config/mongoClient.js";
 const FAVORITES_TABLE = process.env.MONGO_FAVORITES_COLLECTION || 'favorites';
 function getFavoritesCollection() {
     const client = getMongoClient();
