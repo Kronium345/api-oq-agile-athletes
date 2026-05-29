@@ -1,6 +1,7 @@
 import express from 'express';
 import { ObjectId } from 'mongodb';
 import { createFoodScan, deleteFoodScan, findScansInRange, getFoodScanById, getFoodScansByUserId, serializeScan, } from "../models/foodScan.js";
+import { ClarifaiServiceError } from "../services/clarifaiClient.js";
 import { analyzeImage, foodKeywords, nutrientsWithAliases, } from "../services/foodService.js";
 import { endOfDay, endOfMonth, endOfWeek, formatYyyyMmDd, parseYyyyMmDd, startOfDay, startOfMonth, startOfWeek, } from "../utils/dateRanges.js";
 import { routeParam } from "../utils/routeParams.js";
@@ -53,9 +54,16 @@ router.post('/analyze', async (req, res) => {
         return res.status(201).json(mapScanForResponse(saved));
     }
     catch (error) {
+        if (error instanceof ClarifaiServiceError) {
+            console.error('Clarifai food scan error:', error.statusCode, error.message);
+            return res.status(error.statusCode).json({
+                success: false,
+                message: error.message,
+            });
+        }
         const err = error;
         console.error('Error analyzing image', err.response?.data || err);
-        return res.status(500).json({ message: 'Failed to analyze image', error: err.message });
+        return res.status(500).json({ success: false, message: 'Failed to analyze image', error: err.message });
     }
 });
 router.get('/scans/month/:year/:month', async (req, res) => {

@@ -2,6 +2,7 @@ import cors from 'cors';
 import 'dotenv/config';
 import express from 'express';
 import { connectToMongo } from "./config/mongoClient.js";
+import { ensureQuizDataSeeded, getQuizBootstrapStatus } from "./services/quizBootstrap.js";
 import { buildDeleteAccountPlayStoreHtml } from "./deleteAccountPage.js";
 import analyzeFoodRoutes from "./routes/analyzeFood.js";
 import aiChatRoutes from "./routes/aiChat.js";
@@ -66,6 +67,14 @@ app.use((req, res) => {
 async function startServer() {
     try {
         await connectToMongo();
+        await ensureQuizDataSeeded();
+        const quizStatus = await getQuizBootstrapStatus();
+        console.log('[quiz] Mind Center ready:', {
+            questions: quizStatus.questionsCount,
+            categories: quizStatus.categoriesCount,
+            readyForQuizUi: quizStatus.readyForQuizUi,
+            readyForPredict: quizStatus.readyForPredict,
+        });
         app.listen(PORT, () => {
             console.log(`Server is running on port ${PORT}`);
             console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);

@@ -1,7 +1,24 @@
 import express from 'express';
 import { getCategoryByName, getAllQuestions, insertCategories, insertQuestions } from "../models/quiz.js";
-import { getPrediction } from "../utils/mentalClassifier.js";
+import { getQuizBootstrapStatus } from "../services/quizBootstrap.js";
+import { DEFAULT_QUIZ_CATEGORIES, getPrediction } from "../utils/mentalClassifier.js";
 const router = express.Router();
+router.get('/status', async (_req, res) => {
+    try {
+        const status = await getQuizBootstrapStatus();
+        return res.json({
+            success: true,
+            ...status,
+            hint: status.questionsCount === 0
+                ? 'POST /quiz/addQuestions with your app question array (from components/Quiz/questions.js)'
+                : undefined,
+        });
+    }
+    catch (error) {
+        const err = error;
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
 router.get('/quiz', async (_req, res) => {
     try {
         const questions = await getAllQuestions();
@@ -58,11 +75,24 @@ router.post('/predict', async (req, res) => {
                 suggestion: category.suggestion,
             });
         }
+        const fallback = DEFAULT_QUIZ_CATEGORIES.find((c) => c.category === prediction.prediction);
+        if (fallback) {
+            return res.json({
+                msg: 'success',
+                prediction: prediction.prediction,
+                label: prediction.label,
+                category: fallback.category,
+                description: fallback.description,
+                suggestion: fallback.suggestion,
+                source: 'default',
+            });
+        }
         return res.status(404).json({
-            msg: 'Category not found',
+            success: false,
+            message: 'Category not found',
             prediction: prediction.prediction,
             label: prediction.label,
-            hint: 'Seed categories with POST /quiz/addCategories',
+            hint: 'Seed categories with POST /quiz/addCategories or restart server to auto-seed',
         });
     }
     catch (error) {

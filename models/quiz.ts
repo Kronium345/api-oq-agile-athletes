@@ -39,6 +39,10 @@ async function getAllQuestions(): Promise<QuizQuestion[]> {
   return getQuestionsCollection().find({}).toArray();
 }
 
+async function countQuestions(): Promise<number> {
+  return getQuestionsCollection().countDocuments();
+}
+
 async function insertQuestions(questions: QuizQuestion[]): Promise<QuizQuestion[]> {
   if (!questions.length) return [];
   const result = await getQuestionsCollection().insertMany(questions);
@@ -56,7 +60,9 @@ async function getCategoryByName(category: string): Promise<QuizCategory | null>
 }
 
 export {
+  countQuestions,
   getAllQuestions,
+  getCategoriesCollection,
   getCategoryByName,
   insertCategories,
   insertQuestions,

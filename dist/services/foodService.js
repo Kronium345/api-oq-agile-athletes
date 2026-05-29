@@ -1,6 +1,6 @@
 import axios from 'axios';
+import { assertReasonableImageBase64, postClarifaiJson, } from "./clarifaiClient.js";
 const USDA_API_KEY = process.env.USDA_API_KEY || '';
-const CLARIFAI_API_KEY = process.env.FitnessOnePAT || process.env.CLARIFAI_API_KEY || '';
 const FOOD_MODEL_URL = 'https://api.clarifai.com/v2/models/food-item-recognition/versions/1d5fd481e0cf4826aa72ec3ff049e044/outputs';
 export const foodKeywords = [
     'pizza', 'burger', 'sandwich', 'salad', 'pasta', 'sushi', 'cake', 'cookie',
@@ -75,32 +75,22 @@ export async function getNutritionInfo(foodItem) {
     }
 }
 export async function analyzeImage(imageBase64) {
-    if (!CLARIFAI_API_KEY) {
-        throw new Error('Clarifai API key is not configured (FitnessOnePAT)');
-    }
+    assertReasonableImageBase64(imageBase64);
     const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
-    const response = await axios({
-        method: 'POST',
-        url: FOOD_MODEL_URL,
-        headers: {
-            Authorization: `Key ${CLARIFAI_API_KEY}`,
-            'Content-Type': 'application/json',
+    const response = await postClarifaiJson(FOOD_MODEL_URL, {
+        user_app_id: {
+            user_id: 'clarifai',
+            app_id: 'main',
         },
-        data: {
-            user_app_id: {
-                user_id: 'clarifai',
-                app_id: 'main',
-            },
-            inputs: [
-                {
-                    data: {
-                        image: { base64: cleanBase64 },
-                    },
+        inputs: [
+            {
+                data: {
+                    image: { base64: cleanBase64 },
                 },
-            ],
-        },
+            },
+        ],
     });
-    const concepts = response.data?.outputs?.[0]?.data?.concepts || [];
+    const concepts = response?.outputs?.[0]?.data?.concepts || [];
     const filteredConcepts = concepts.filter((concept) => {
         const conceptName = (concept.name || '').toLowerCase();
         if (foodKeywords.some((keyword) => conceptName.includes(keyword))) {

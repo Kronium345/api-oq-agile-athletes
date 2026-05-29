@@ -1,6 +1,7 @@
 import express, { Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
+import { ClarifaiServiceError } from '../services/clarifaiClient.ts';
 import {
   analyzeImage,
   foodKeywords,
@@ -68,8 +69,15 @@ router.post('/', async (req: Request, res: Response) => {
       path: filename,
     });
   } catch (error: unknown) {
+    if (error instanceof ClarifaiServiceError) {
+      console.error('Clarifai food scan error:', error.statusCode, error.message);
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message,
+      });
+    }
     console.error('Error analyzing image', error);
-    return res.status(500).json({ message: 'Failed to analyze image' });
+    return res.status(500).json({ success: false, message: 'Failed to analyze image' });
   }
 });
 

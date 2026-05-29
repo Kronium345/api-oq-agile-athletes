@@ -8,6 +8,7 @@ import {
   getFoodScansByUserId,
   serializeScan,
 } from '../models/foodScan.ts';
+import { ClarifaiServiceError } from '../services/clarifaiClient.ts';
 import {
   analyzeImage,
   foodKeywords,
@@ -81,9 +82,16 @@ router.post('/analyze', async (req: Request, res: Response) => {
     const saved = await createFoodScan(userId, validFoodItems);
     return res.status(201).json(mapScanForResponse(saved));
   } catch (error: unknown) {
+    if (error instanceof ClarifaiServiceError) {
+      console.error('Clarifai food scan error:', error.statusCode, error.message);
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message,
+      });
+    }
     const err = error as { message?: string; response?: { data?: unknown } };
     console.error('Error analyzing image', err.response?.data || err);
-    return res.status(500).json({ message: 'Failed to analyze image', error: err.message });
+    return res.status(500).json({ success: false, message: 'Failed to analyze image', error: err.message });
   }
 });
 

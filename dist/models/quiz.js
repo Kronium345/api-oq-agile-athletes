@@ -14,6 +14,9 @@ function getCategoriesCollection() {
 async function getAllQuestions() {
     return getQuestionsCollection().find({}).toArray();
 }
+async function countQuestions() {
+    return getQuestionsCollection().countDocuments();
+}
 async function insertQuestions(questions) {
     if (!questions.length)
         return [];
@@ -29,4 +32,4 @@ async function insertCategories(categories) {
 async function getCategoryByName(category) {
     return getCategoriesCollection().findOne({ category });
 }
-export { getAllQuestions, getCategoryByName, insertCategories, insertQuestions, };
+export { countQuestions, getAllQuestions, getCategoriesCollection, getCategoryByName, insertCategories, insertQuestions, };

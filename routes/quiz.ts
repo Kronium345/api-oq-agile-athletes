@@ -1,8 +1,26 @@
 import express, { Request, Response } from 'express';
 import { getCategoryByName, getAllQuestions, insertCategories, insertQuestions } from '../models/quiz.ts';
-import { getPrediction } from '../utils/mentalClassifier.ts';
+import { getQuizBootstrapStatus } from '../services/quizBootstrap.ts';
+import { DEFAULT_QUIZ_CATEGORIES, getPrediction } from '../utils/mentalClassifier.ts';
 
 const router = express.Router();
+
+router.get('/status', async (_req: Request, res: Response) => {
+  try {
+    const status = await getQuizBootstrapStatus();
+    return res.json({
+      success: true,
+      ...status,
+      hint:
+        status.questionsCount === 0
+          ? 'POST /quiz/addQuestions with your app question array (from components/Quiz/questions.js)'
+          : undefined,
+    });
+  } catch (error: unknown) {
+    const err = error as Error;
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
 
 router.get('/quiz', async (_req: Request, res: Response) => {
   try {
@@ -64,11 +82,25 @@ router.post('/predict', async (req: Request, res: Response) => {
       });
     }
 
+    const fallback = DEFAULT_QUIZ_CATEGORIES.find((c) => c.category === prediction.prediction);
+    if (fallback) {
+      return res.json({
+        msg: 'success',
+        prediction: prediction.prediction,
+        label: prediction.label,
+        category: fallback.category,
+        description: fallback.description,
+        suggestion: fallback.suggestion,
+        source: 'default',
+      });
+    }
+
     return res.status(404).json({
-      msg: 'Category not found',
+      success: false,
+      message: 'Category not found',
       prediction: prediction.prediction,
       label: prediction.label,
-      hint: 'Seed categories with POST /quiz/addCategories',
+      hint: 'Seed categories with POST /quiz/addCategories or restart server to auto-seed',
     });
   } catch (error: unknown) {
     const err = error as Error;
