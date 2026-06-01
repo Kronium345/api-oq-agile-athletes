@@ -62,10 +62,14 @@ export function stripDataUrlPrefix(imageBase64: string): string {
   return imageBase64.replace(/^data:image\/\w+;base64,/, '');
 }
 
-/** Reject oversized base64 payloads before calling vision APIs. */
+export function getFoodScanMaxBase64Chars(): number {
+  return Number(process.env.FOOD_SCAN_MAX_BASE64_CHARS || 900_000);
+}
+
+/** Reject oversized base64 payloads before calling vision APIs (after prepareFoodScanBase64). */
 export function assertReasonableImageBase64(imageBase64: string): void {
   const clean = stripDataUrlPrefix(imageBase64);
-  const maxChars = Number(process.env.FOOD_SCAN_MAX_BASE64_CHARS || 900_000);
+  const maxChars = getFoodScanMaxBase64Chars();
   if (clean.length > maxChars) {
     throw new ClarifaiServiceError(
       `Image is too large (${Math.round(clean.length / 1024)}KB base64). Maximum is about ${Math.round(maxChars / 1024)}KB. Resize or compress the photo in the app before scanning.`,

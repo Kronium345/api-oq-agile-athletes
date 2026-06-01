@@ -11,6 +11,7 @@ import {
   type ClarifaiLikeConcept,
   type FoodVisionProvider,
 } from './foodVisionClient.ts';
+import { prepareFoodScanBase64 } from '../utils/foodImagePrep.ts';
 
 const USDA_API_KEY = process.env.USDA_API_KEY || '';
 
@@ -169,7 +170,8 @@ function filterFoodConcepts(
 }
 
 export async function analyzeImage(imageBase64: string): Promise<FoodItemWithNutrition[]> {
-  const cleanBase64 = stripDataUrlPrefix(imageBase64);
+  const stripped = stripDataUrlPrefix(imageBase64);
+  const cleanBase64 = await prepareFoodScanBase64(stripped);
   assertReasonableImageBase64(cleanBase64);
 
   const provider = getFoodVisionProvider();

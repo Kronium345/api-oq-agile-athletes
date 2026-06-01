@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { assertReasonableImageBase64, postClarifaiJson, stripDataUrlPrefix, } from "./clarifaiClient.js";
 import { getFoodVisionProvider, predictFood, toClarifaiConcepts, } from "./foodVisionClient.js";
+import { prepareFoodScanBase64 } from "../utils/foodImagePrep.js";
 const USDA_API_KEY = process.env.USDA_API_KEY || '';
 const FOOD_MODEL_URL = 'https://api.clarifai.com/v2/models/food-item-recognition/versions/1d5fd481e0cf4826aa72ec3ff049e044/outputs';
 export const foodKeywords = [
@@ -113,7 +114,8 @@ function filterFoodConcepts(concepts, provider) {
     });
 }
 export async function analyzeImage(imageBase64) {
-    const cleanBase64 = stripDataUrlPrefix(imageBase64);
+    const stripped = stripDataUrlPrefix(imageBase64);
+    const cleanBase64 = await prepareFoodScanBase64(stripped);
     assertReasonableImageBase64(cleanBase64);
     const provider = getFoodVisionProvider();
     let concepts;
