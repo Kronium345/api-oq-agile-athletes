@@ -4,8 +4,9 @@ import { getFoodVisionProvider, predictFood, } from "./foodVisionClient.js";
 import { prepareFoodScanBase64 } from "../utils/foodImagePrep.js";
 const USDA_API_KEY = process.env.USDA_API_KEY || '';
 const FOOD_MODEL_URL = 'https://api.clarifai.com/v2/models/food-item-recognition/versions/1d5fd481e0cf4826aa72ec3ff049e044/outputs';
-const HTTP_IS_FOOD_CONFIDENCE = Number(process.env.FOOD_SCAN_IS_FOOD_CONFIDENCE || 0.5);
-const UNCERTAIN_CONFIDENCE = Number(process.env.FOOD_SCAN_UNCERTAIN_CONFIDENCE || 0.6);
+/** Food-101 ONNX often tops out ~0.15–0.35 on hard photos; 0.5 caused false "not food" jokes. */
+const HTTP_IS_FOOD_CONFIDENCE = Number(process.env.FOOD_SCAN_IS_FOOD_CONFIDENCE || 0.15);
+const UNCERTAIN_CONFIDENCE = Number(process.env.FOOD_SCAN_UNCERTAIN_CONFIDENCE || 0.12);
 const MAX_ALTERNATES = Number(process.env.FOOD_SCAN_MAX_ALTERNATES || 4);
 export const foodKeywords = [
     'pizza', 'burger', 'sandwich', 'salad', 'pasta', 'sushi', 'cake', 'cookie',

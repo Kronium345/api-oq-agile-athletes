@@ -38,6 +38,7 @@ router.post('/', async (req, res) => {
         }
         const primary = mapFoodItemForResponse(analysis.primary);
         const alternates = analysis.alternates.map(mapFoodItemForResponse);
+        const lowConfidence = primary.confidence < 0.35;
         return res.status(200).json({
             isFood: true,
             primary,
@@ -45,6 +46,11 @@ router.post('/', async (req, res) => {
             /** Only the primary item — do not sum alternates for meal totals. */
             foodItems: [primary],
             path: filename,
+            ...(lowConfidence
+                ? {
+                    confidenceWarning: 'Identification confidence is low — label may be wrong (e.g. packaged chicken). You can edit the food name after logging.',
+                }
+                : {}),
         });
     }
     catch (error) {
