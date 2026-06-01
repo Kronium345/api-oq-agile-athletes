@@ -9,3 +9,6 @@ services:
     envVars:
       - key: NODE_VERSION
         value: 20
+      # Set in Render dashboard (sync FOOD_VISION_API_KEY with Python service):
+      # FOOD_VISION_PROVIDER, FOOD_VISION_URL, FOOD_VISION_API_KEY, FOOD_VISION_TIMEOUT_MS
+      # USDA_API_KEY, MONGODB_URI, JWT_SECRET, FitnessOnePAT (exercise)

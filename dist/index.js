@@ -2,6 +2,7 @@ import cors from 'cors';
 import 'dotenv/config';
 import express from 'express';
 import { connectToMongo } from "./config/mongoClient.js";
+import { checkFoodVisionReady, getFoodVisionProvider, } from "./services/foodVisionClient.js";
 import { ensureQuizDataSeeded, getQuizBootstrapStatus } from "./services/quizBootstrap.js";
 import { buildDeleteAccountPlayStoreHtml } from "./deleteAccountPage.js";
 import analyzeFoodRoutes from "./routes/analyzeFood.js";
@@ -75,6 +76,17 @@ async function startServer() {
             readyForQuizUi: quizStatus.readyForQuizUi,
             readyForPredict: quizStatus.readyForPredict,
         });
+        const foodVisionProvider = getFoodVisionProvider();
+        if (foodVisionProvider === 'http') {
+            const ready = await checkFoodVisionReady();
+            console.log('[food-vision] provider=http', { ready });
+            if (!ready) {
+                console.warn('[food-vision] Python service /ready is not 200 yet (cold start). Food scans may return 503 until the model loads.');
+            }
+        }
+        else {
+            console.log('[food-vision] provider=clarifai');
+        }
         app.listen(PORT, () => {
             console.log(`Server is running on port ${PORT}`);
             console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);

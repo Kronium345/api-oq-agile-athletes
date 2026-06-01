@@ -1,12 +1,16 @@
 import express, { Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
-import { ClarifaiServiceError } from '../services/clarifaiClient.ts';
+import { stripDataUrlPrefix } from '../services/clarifaiClient.ts';
 import {
   analyzeImage,
   foodKeywords,
   nutrientsWithAliases,
 } from '../services/foodService.ts';
+import {
+  foodAnalysisErrorToHttp,
+  isFoodAnalysisServiceError,
+} from '../utils/foodAnalysisErrors.ts';
 
 const router = express.Router();
 
@@ -25,10 +29,7 @@ router.post('/', async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'Image base64 data missing' });
     }
 
-    const buffer = Buffer.from(
-      imageBase64.replace(/^data:image\/\w+;base64,/, ''),
-      'base64'
-    );
+    const buffer = Buffer.from(stripDataUrlPrefix(imageBase64), 'base64');
     const uploadsDir = path.join('uploads');
     fs.mkdirSync(uploadsDir, { recursive: true });
     const filename = path.join(uploadsDir, `${Date.now()}.jpg`);
@@ -69,15 +70,16 @@ router.post('/', async (req: Request, res: Response) => {
       path: filename,
     });
   } catch (error: unknown) {
-    if (error instanceof ClarifaiServiceError) {
-      console.error('Clarifai food scan error:', error.statusCode, error.message);
-      return res.status(error.statusCode).json({
-        success: false,
-        message: error.message,
-      });
+    if (isFoodAnalysisServiceError(error)) {
+      console.error('Food analysis error:', error.statusCode, error.message);
+      const { status, body } = foodAnalysisErrorToHttp(error);
+      return res.status(status).json(body);
     }
     console.error('Error analyzing image', error);
-    return res.status(500).json({ success: false, message: 'Failed to analyze image' });
+    return res.status(500).json({
+      success: false,
+      message: 'Could not analyze image. Please try again shortly.',
+    });
   }
 });
 

@@ -1,8 +1,9 @@
 import express from 'express';
 import { ObjectId } from 'mongodb';
 import { createFoodScan, deleteFoodScan, findScansInRange, getFoodScanById, getFoodScansByUserId, serializeScan, } from "../models/foodScan.js";
-import { ClarifaiServiceError } from "../services/clarifaiClient.js";
+import { stripDataUrlPrefix } from "../services/clarifaiClient.js";
 import { analyzeImage, foodKeywords, nutrientsWithAliases, } from "../services/foodService.js";
+import { foodAnalysisErrorToHttp, isFoodAnalysisServiceError, } from "../utils/foodAnalysisErrors.js";
 import { endOfDay, endOfMonth, endOfWeek, formatYyyyMmDd, parseYyyyMmDd, startOfDay, startOfMonth, startOfWeek, } from "../utils/dateRanges.js";
 import { routeParam } from "../utils/routeParams.js";
 const router = express.Router();
@@ -47,23 +48,24 @@ router.post('/analyze', async (req, res) => {
         return res.status(400).json({ message: 'User ID and image path are required' });
     }
     try {
-        const imageBase64 = imagePath.replace(/^data:image\/\w+;base64,/, '');
+        const imageBase64 = stripDataUrlPrefix(imagePath);
         const foodItems = await analyzeImage(imageBase64);
         const validFoodItems = foodItems.filter((item) => item.nutrients !== null);
         const saved = await createFoodScan(userId, validFoodItems);
         return res.status(201).json(mapScanForResponse(saved));
     }
     catch (error) {
-        if (error instanceof ClarifaiServiceError) {
-            console.error('Clarifai food scan error:', error.statusCode, error.message);
-            return res.status(error.statusCode).json({
-                success: false,
-                message: error.message,
-            });
+        if (isFoodAnalysisServiceError(error)) {
+            console.error('Food analysis error:', error.statusCode, error.message);
+            const { status, body } = foodAnalysisErrorToHttp(error);
+            return res.status(status).json(body);
         }
         const err = error;
-        console.error('Error analyzing image', err.response?.data || err);
-        return res.status(500).json({ success: false, message: 'Failed to analyze image', error: err.message });
+        console.error('Error analyzing image', err.message || err);
+        return res.status(500).json({
+            success: false,
+            message: 'Could not analyze image. Please try again shortly.',
+        });
     }
 });
 router.get('/scans/month/:year/:month', async (req, res) => {

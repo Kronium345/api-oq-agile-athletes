@@ -8,13 +8,17 @@ import {
   getFoodScansByUserId,
   serializeScan,
 } from '../models/foodScan.ts';
-import { ClarifaiServiceError } from '../services/clarifaiClient.ts';
+import { stripDataUrlPrefix } from '../services/clarifaiClient.ts';
 import {
   analyzeImage,
   foodKeywords,
   nutrientsWithAliases,
   type FoodItemWithNutrition,
 } from '../services/foodService.ts';
+import {
+  foodAnalysisErrorToHttp,
+  isFoodAnalysisServiceError,
+} from '../utils/foodAnalysisErrors.ts';
 import {
   endOfDay,
   endOfMonth,
@@ -75,23 +79,24 @@ router.post('/analyze', async (req: Request, res: Response) => {
   }
 
   try {
-    const imageBase64 = imagePath.replace(/^data:image\/\w+;base64,/, '');
+    const imageBase64 = stripDataUrlPrefix(imagePath);
     const foodItems = await analyzeImage(imageBase64);
     const validFoodItems = foodItems.filter((item) => item.nutrients !== null);
 
     const saved = await createFoodScan(userId, validFoodItems);
     return res.status(201).json(mapScanForResponse(saved));
   } catch (error: unknown) {
-    if (error instanceof ClarifaiServiceError) {
-      console.error('Clarifai food scan error:', error.statusCode, error.message);
-      return res.status(error.statusCode).json({
-        success: false,
-        message: error.message,
-      });
+    if (isFoodAnalysisServiceError(error)) {
+      console.error('Food analysis error:', error.statusCode, error.message);
+      const { status, body } = foodAnalysisErrorToHttp(error);
+      return res.status(status).json(body);
     }
-    const err = error as { message?: string; response?: { data?: unknown } };
-    console.error('Error analyzing image', err.response?.data || err);
-    return res.status(500).json({ success: false, message: 'Failed to analyze image', error: err.message });
+    const err = error as { message?: string };
+    console.error('Error analyzing image', err.message || err);
+    return res.status(500).json({
+      success: false,
+      message: 'Could not analyze image. Please try again shortly.',
+    });
   }
 });
 

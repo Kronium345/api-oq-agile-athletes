@@ -58,9 +58,13 @@ export function mapClarifaiAxiosError(error: unknown): ClarifaiServiceError {
   );
 }
 
-/** Reject oversized base64 payloads before calling Clarifai (saves quota and avoids huge requests). */
+export function stripDataUrlPrefix(imageBase64: string): string {
+  return imageBase64.replace(/^data:image\/\w+;base64,/, '');
+}
+
+/** Reject oversized base64 payloads before calling vision APIs. */
 export function assertReasonableImageBase64(imageBase64: string): void {
-  const clean = imageBase64.replace(/^data:image\/\w+;base64,/, '');
+  const clean = stripDataUrlPrefix(imageBase64);
   const maxChars = Number(process.env.FOOD_SCAN_MAX_BASE64_CHARS || 900_000);
   if (clean.length > maxChars) {
     throw new ClarifaiServiceError(

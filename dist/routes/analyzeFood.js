@@ -1,8 +1,9 @@
 import express from 'express';
 import fs from 'fs';
 import path from 'path';
-import { ClarifaiServiceError } from "../services/clarifaiClient.js";
+import { stripDataUrlPrefix } from "../services/clarifaiClient.js";
 import { analyzeImage, foodKeywords, nutrientsWithAliases, } from "../services/foodService.js";
+import { foodAnalysisErrorToHttp, isFoodAnalysisServiceError, } from "../utils/foodAnalysisErrors.js";
 const router = express.Router();
 const JOKES = [
     "Haha! That's not a food item! Try again.",
@@ -16,7 +17,7 @@ router.post('/', async (req, res) => {
         if (!imageBase64) {
             return res.status(400).json({ message: 'Image base64 data missing' });
         }
-        const buffer = Buffer.from(imageBase64.replace(/^data:image\/\w+;base64,/, ''), 'base64');
+        const buffer = Buffer.from(stripDataUrlPrefix(imageBase64), 'base64');
         const uploadsDir = path.join('uploads');
         fs.mkdirSync(uploadsDir, { recursive: true });
         const filename = path.join(uploadsDir, `${Date.now()}.jpg`);
@@ -51,15 +52,16 @@ router.post('/', async (req, res) => {
         });
     }
     catch (error) {
-        if (error instanceof ClarifaiServiceError) {
-            console.error('Clarifai food scan error:', error.statusCode, error.message);
-            return res.status(error.statusCode).json({
-                success: false,
-                message: error.message,
-            });
+        if (isFoodAnalysisServiceError(error)) {
+            console.error('Food analysis error:', error.statusCode, error.message);
+            const { status, body } = foodAnalysisErrorToHttp(error);
+            return res.status(status).json(body);
         }
         console.error('Error analyzing image', error);
-        return res.status(500).json({ success: false, message: 'Failed to analyze image' });
+        return res.status(500).json({
+            success: false,
+            message: 'Could not analyze image. Please try again shortly.',
+        });
     }
 });
 export default router;

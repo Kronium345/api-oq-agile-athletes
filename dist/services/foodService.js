@@ -1,5 +1,6 @@
 import axios from 'axios';
-import { assertReasonableImageBase64, postClarifaiJson, } from "./clarifaiClient.js";
+import { assertReasonableImageBase64, postClarifaiJson, stripDataUrlPrefix, } from "./clarifaiClient.js";
+import { getFoodVisionProvider, predictFood, toClarifaiConcepts, } from "./foodVisionClient.js";
 const USDA_API_KEY = process.env.USDA_API_KEY || '';
 const FOOD_MODEL_URL = 'https://api.clarifai.com/v2/models/food-item-recognition/versions/1d5fd481e0cf4826aa72ec3ff049e044/outputs';
 export const foodKeywords = [
@@ -13,6 +14,9 @@ export const foodKeywords = [
     'omelette', 'milkshake', 'dal', 'biryani', 'naan', 'roti',
     'paneer', 'samosa', 'dosa', 'idli', 'vada', 'chutney', 'gravy',
     'kebab', 'shawarma', 'falafel', 'hummus', 'pulao', 'khichdi', 'paratha',
+    // Common Food-101 dish names (Python ONNX model)
+    'lasagna', 'ramen', 'dumpling', 'donut', 'hamburger', 'hot dog', 'wonton',
+    'pad thai', 'pho', 'risotto', 'tiramisu', 'cheesecake', 'miso', 'sashimi',
 ];
 function defaultNutrients() {
     return {
@@ -74,9 +78,7 @@ export async function getNutritionInfo(foodItem) {
         return { name: foodItem.name, confidence: foodItem.confidence, nutrients: null };
     }
 }
-export async function analyzeImage(imageBase64) {
-    assertReasonableImageBase64(imageBase64);
-    const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
+async function getClarifaiFoodConcepts(cleanBase64) {
     const response = await postClarifaiJson(FOOD_MODEL_URL, {
         user_app_id: {
             user_id: 'clarifai',
@@ -91,17 +93,47 @@ export async function analyzeImage(imageBase64) {
         ],
     });
     const concepts = response?.outputs?.[0]?.data?.concepts || [];
-    const filteredConcepts = concepts.filter((concept) => {
+    return concepts.map((concept) => ({
+        name: concept.name || 'unknown',
+        value: concept.value ?? 0,
+    }));
+}
+/**
+ * Food-101 ONNX labels may not match foodKeywords; use a lower bar for the http provider.
+ * Clarifai path keeps the original 0.6 threshold when there is no keyword match.
+ */
+function filterFoodConcepts(concepts, provider) {
+    const minConfidenceWithoutKeyword = provider === 'http' ? 0.25 : 0.6;
+    return concepts.filter((concept) => {
         const conceptName = (concept.name || '').toLowerCase();
         if (foodKeywords.some((keyword) => conceptName.includes(keyword))) {
             return true;
         }
-        return (concept.value ?? 0) >= 0.6;
+        return (concept.value ?? 0) >= minConfidenceWithoutKeyword;
     });
+}
+export async function analyzeImage(imageBase64) {
+    const cleanBase64 = stripDataUrlPrefix(imageBase64);
+    assertReasonableImageBase64(cleanBase64);
+    const provider = getFoodVisionProvider();
+    let concepts;
+    if (provider === 'http') {
+        const result = await predictFood(cleanBase64);
+        concepts = toClarifaiConcepts(result.concepts);
+        console.log('[food-vision] predict', {
+            model: result.model,
+            inferenceMs: result.inferenceMs,
+            conceptCount: concepts.length,
+        });
+    }
+    else {
+        concepts = await getClarifaiFoodConcepts(cleanBase64);
+    }
+    const filteredConcepts = filterFoodConcepts(concepts, provider);
     const enrichedFoods = await Promise.all(filteredConcepts.map(async (concept) => {
         const foodItem = {
-            name: concept.name || 'unknown',
-            confidence: concept.value ?? 0,
+            name: concept.name,
+            confidence: concept.value,
         };
         return getNutritionInfo(foodItem);
     }));
