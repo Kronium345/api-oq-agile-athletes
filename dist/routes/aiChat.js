@@ -1,7 +1,8 @@
-import axios from 'axios';
 import express from 'express';
 import { ObjectId } from 'mongodb';
-import { deleteChatById, getChatById, getChatsByUserId, saveChat, } from "../models/aiChat.js";
+import { deleteChatById, getChatById, getChatsByUserId, saveChat, updateChatById, } from "../models/aiChat.js";
+import { CohereChatError, generateCohereReply, toGenerationsResponse, } from "../services/cohereChat.js";
+import { chatGenerateRateLimiter } from "../utils/chatRateLimit.js";
 import { routeParam } from "../utils/routeParams.js";
 const router = express.Router();
 function serializeChat(doc) {
@@ -10,16 +11,76 @@ function serializeChat(doc) {
     return {
         ...doc,
         _id: doc._id?.toString(),
+        savedAt: doc.savedAt,
     };
 }
+function validateMessages(messages) {
+    if (!Array.isArray(messages))
+        return false;
+    return messages.every((m) => m &&
+        typeof m === 'object' &&
+        typeof m.text === 'string' &&
+        m.text.trim().length > 0);
+}
+/** Trainer / AI chat service health (Cohere configured, Mongo reachable). */
+router.get('/status', async (_req, res) => {
+    const cohereConfigured = Boolean(process.env.COHERE_API_KEY?.trim());
+    return res.json({
+        success: true,
+        service: 'ai-trainer-chat',
+        cohereConfigured,
+        model: process.env.COHERE_MODEL || 'command',
+        rateLimitPerMinute: Number(process.env.CHAT_RATE_LIMIT_PER_MINUTE || 15),
+        endpoints: {
+            generate: 'POST /chat/generate',
+            save: 'POST /chat/save-chat',
+            list: 'GET /chat/get-chat/:userId',
+            byId: 'GET /chat/get-chat-by-id/:chatId',
+            delete: 'DELETE /chat/delete-chat/:chatId',
+        },
+        hint: cohereConfigured
+            ? undefined
+            : 'Set COHERE_API_KEY on Render for POST /chat/generate',
+    });
+});
+/**
+ * Upsert by userId + title (legacy Fitness One behavior).
+ * Optional chatId: update existing document by Mongo _id instead.
+ */
 router.post('/save-chat', async (req, res) => {
-    const { userId, title, messages } = req.body;
-    if (!userId || !title) {
-        return res.status(400).json({ message: 'userId and title are required' });
+    const { userId, title, messages, chatId } = req.body;
+    if (!userId?.trim()) {
+        return res.status(400).json({ message: 'userId is required' });
+    }
+    if (!title?.trim()) {
+        return res.status(400).json({ message: 'title is required' });
+    }
+    if (!validateMessages(messages)) {
+        return res.status(400).json({
+            message: 'messages must be a non-empty array of { type, text } objects',
+        });
     }
     try {
-        await saveChat(userId, title, messages || []);
-        return res.status(200).json({ message: 'Chat saved successfully!' });
+        let saved;
+        if (chatId?.trim()) {
+            if (!ObjectId.isValid(chatId)) {
+                return res.status(400).json({ message: 'Invalid chatId format' });
+            }
+            saved = await updateChatById(chatId, { title: title.trim(), messages });
+            if (!saved) {
+                return res.status(404).json({ message: 'Chat not found' });
+            }
+            if (saved.userId !== userId) {
+                return res.status(403).json({ message: 'Chat does not belong to this user' });
+            }
+        }
+        else {
+            saved = await saveChat(userId.trim(), title.trim(), messages);
+        }
+        return res.status(200).json({
+            message: 'Chat saved successfully!',
+            chat: serializeChat(saved),
+        });
     }
     catch (error) {
         console.error('Error saving chat:', error);
@@ -28,6 +89,9 @@ router.post('/save-chat', async (req, res) => {
 });
 router.get('/get-chat/:userId', async (req, res) => {
     const userId = routeParam(req.params.userId);
+    if (!userId.trim()) {
+        return res.status(400).json({ message: 'userId is required' });
+    }
     try {
         const chats = await getChatsByUserId(userId);
         const serialized = chats.map((c) => serializeChat(c));
@@ -62,49 +126,33 @@ router.delete('/delete-chat/:chatId', async (req, res) => {
         });
     }
 });
-router.post('/generate', async (req, res) => {
-    const { prompt } = req.body;
-    if (!prompt || typeof prompt !== 'string') {
-        return res.status(400).json({ error: 'prompt is required' });
-    }
-    const apiKey = process.env.COHERE_API_KEY;
-    if (!apiKey) {
-        return res.status(503).json({
-            error: 'AI service is not configured',
-            details: 'COHERE_API_KEY is missing',
-        });
-    }
+/**
+ * Cohere fitness trainer reply.
+ * Body: { prompt: string, chatHistory?: ChatMessage[] }
+ * Response (legacy): { generations: [{ text }] }
+ */
+router.post('/generate', chatGenerateRateLimiter, async (req, res) => {
+    const { prompt, chatHistory, messages } = req.body;
+    const history = chatHistory ?? messages ?? [];
     try {
-        const response = await axios.post('https://api.cohere.ai/v1/chat', {
-            message: prompt,
-            model: process.env.COHERE_MODEL || 'command',
-            temperature: 0.7,
-            chat_history: [],
-            prompt_truncation: 'AUTO',
-            stream: false,
-            citation_quality: 'accurate',
-            connectors: [],
-            documents: [],
-        }, {
-            headers: {
-                Authorization: `Bearer ${apiKey}`,
-                'Content-Type': 'application/json',
-            },
+        const { text, model } = await generateCohereReply({
+            prompt: prompt || '',
+            chatHistory: history,
         });
-        const text = response.data?.text ??
-            response.data?.message ??
-            response.data?.generations?.[0]?.text ??
-            '';
-        return res.json({
-            generations: [{ text }],
-        });
+        console.log('[chat] generate ok', { model, promptLength: prompt?.length ?? 0 });
+        return res.json(toGenerationsResponse(text));
     }
     catch (error) {
-        const axiosErr = error;
-        console.error('AI chat error:', axiosErr.response?.data || error);
+        if (error instanceof CohereChatError) {
+            console.error('[chat] generate error:', error.statusCode, error.message);
+            return res.status(error.statusCode).json({
+                error: error.message,
+                details: error.details,
+            });
+        }
+        console.error('[chat] generate error:', error);
         return res.status(500).json({
             error: 'Failed to generate response',
-            details: axiosErr.response?.data || axiosErr.message,
         });
     }
 });

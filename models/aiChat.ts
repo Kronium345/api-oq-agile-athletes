@@ -26,8 +26,8 @@ function getChatCollection(): Collection<AIChatDocument> {
 function normalizeMessages(messages: ChatMessage[]): ChatMessage[] {
   const now = new Date().toISOString();
   return (messages || []).map((m) => ({
-    text: m.text ?? '',
-    ...(m.type ? { type: m.type } : {}),
+    text: String(m.text ?? ''),
+    type: m.type === 'user' || m.type === 'bot' ? m.type : m.type ? String(m.type) : 'bot',
     createdAt: m.createdAt ? new Date(m.createdAt).toISOString() : now,
   }));
 }
@@ -56,6 +56,31 @@ async function saveChat(
   return updated!;
 }
 
+async function updateChatById(
+  chatId: string,
+  updates: { title?: string; messages?: ChatMessage[] }
+): Promise<AIChatDocument | null> {
+  if (!ObjectId.isValid(chatId)) return null;
+
+  const collection = getChatCollection();
+  const $set: Partial<AIChatDocument> = { savedAt: new Date().toISOString() };
+
+  if (updates.title !== undefined) {
+    $set.title = updates.title;
+  }
+  if (updates.messages !== undefined) {
+    $set.messages = normalizeMessages(updates.messages);
+  }
+
+  const result = await collection.findOneAndUpdate(
+    { _id: new ObjectId(chatId) },
+    { $set },
+    { returnDocument: 'after' }
+  );
+
+  return result ?? null;
+}
+
 async function getChatsByUserId(userId: string): Promise<AIChatDocument[]> {
   const collection = getChatCollection();
   return collection.find({ userId }).sort({ savedAt: -1 }).toArray();
@@ -80,10 +105,16 @@ async function deleteChatsByUserId(userId: string): Promise<number> {
   return result.deletedCount;
 }
 
+async function countChatsByUserId(userId: string): Promise<number> {
+  return getChatCollection().countDocuments({ userId });
+}
+
 export {
+  countChatsByUserId,
   deleteChatById,
   deleteChatsByUserId,
   getChatById,
   getChatsByUserId,
   saveChat,
+  updateChatById,
 };

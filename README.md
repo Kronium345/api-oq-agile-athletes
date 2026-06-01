@@ -55,6 +55,27 @@ Misclassified packaged food (e.g. chicken → apple pie) is a Food-101 limitatio
 - `POST /analyze-food` — preview + `isFood` + `primary` / `alternates`
 - `POST /foodScan/analyze` — analyze + save **primary only** to Mongo
 
+## AI Trainer chat (`/chat`)
+
+Fitness One–compatible AI coach (Cohere). Mounted at `/chat` in `index.ts`.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/chat/status` | Cohere configured?, rate limit, endpoint list |
+| POST | `/chat/generate` | Body: `{ prompt, chatHistory? }` → `{ generations: [{ text }] }` |
+| POST | `/chat/save-chat` | Body: `{ userId, title, messages, chatId? }` — upsert by title or update by `chatId` |
+| GET | `/chat/get-chat/:userId` | All saved chats (newest first) |
+| GET | `/chat/get-chat-by-id/:chatId` | Single chat |
+| DELETE | `/chat/delete-chat/:chatId` | Delete by Mongo `_id` |
+
+**Env:** `COHERE_API_KEY` (required), `COHERE_MODEL` (default `command`), `CHAT_RATE_LIMIT_PER_MINUTE` (default `15`, no Arcjet).
+
+**Messages** stored as `{ type: 'user' \| 'bot', text, createdAt }` in collection `ai_chats`.
+
+**Multi-turn:** Optional `chatHistory` / `messages` array on `/chat/generate` is sent to Cohere as `chat_history` (planScreen still works with empty history).
+
+Point the mobile app `api/axios.js` base URL to this API (not `fitness-one-server`) when ready.
+
 ## Mind Center (mental wellness quiz)
 
 Mounted at **`/quiz`** (no `/mental` API). Powers the Assessment flow in the mobile app.
