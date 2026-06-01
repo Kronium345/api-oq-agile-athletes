@@ -14,8 +14,9 @@ function getApiKey() {
     }
     return key;
 }
+/** `command` was retired 2025-09-15; use a current chat model ID. */
 function getModel() {
-    return process.env.COHERE_MODEL?.trim() || 'command';
+    return process.env.COHERE_MODEL?.trim() || 'command-r7b-12-2024';
 }
 function getTimeoutMs() {
     return Number(process.env.COHERE_TIMEOUT_MS || 60000);
@@ -44,9 +45,6 @@ export async function generateCohereReply(options) {
             chat_history: history,
             prompt_truncation: 'AUTO',
             stream: false,
-            citation_quality: 'accurate',
-            connectors: [],
-            documents: [],
         }, {
             headers: {
                 Authorization: `Bearer ${getApiKey()}`,
@@ -71,8 +69,16 @@ export async function generateCohereReply(options) {
             const axiosErr = error;
             const status = axiosErr.response?.status;
             const detail = axiosErr.response?.data;
+            const cohereMessage = typeof detail === 'object' && detail && 'message' in detail
+                ? String(detail.message)
+                : typeof detail === 'string'
+                    ? detail
+                    : axiosErr.message;
             if (status === 401 || status === 403) {
                 throw new CohereChatError('Cohere authentication failed. Check COHERE_API_KEY.', status, detail);
+            }
+            if (status === 404) {
+                throw new CohereChatError(`Cohere model not found or retired. Set COHERE_MODEL to a current model (e.g. command-r7b-12-2024). ${cohereMessage}`, 404, detail);
             }
             if (status === 429) {
                 throw new CohereChatError('Cohere rate limit exceeded. Try again shortly.', 429, detail);
@@ -80,7 +86,7 @@ export async function generateCohereReply(options) {
             if (axiosErr.code === 'ECONNABORTED') {
                 throw new CohereChatError('AI request timed out. Try again.', 504);
             }
-            throw new CohereChatError('Failed to generate response from Cohere', status || 502, detail);
+            throw new CohereChatError(cohereMessage || 'Failed to generate response from Cohere', status || 502, detail);
         }
         const err = error;
         throw new CohereChatError(err.message || 'Failed to generate response', 502);

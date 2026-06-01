@@ -68,7 +68,7 @@ Fitness One–compatible AI coach (Cohere). Mounted at `/chat` in `index.ts`.
 | GET | `/chat/get-chat-by-id/:chatId` | Single chat |
 | DELETE | `/chat/delete-chat/:chatId` | Delete by Mongo `_id` |
 
-**Env:** `COHERE_API_KEY` (required), `COHERE_MODEL` (default `command`), `CHAT_RATE_LIMIT_PER_MINUTE` (default `15`, no Arcjet).
+**Env:** `COHERE_API_KEY` (required), `COHERE_MODEL` (default `command-r7b-12-2024` — do **not** use retired `command`), `CHAT_RATE_LIMIT_PER_MINUTE` (default `15`, no Arcjet).
 
 **Messages** stored as `{ type: 'user' \| 'bot', text, createdAt }` in collection `ai_chats`.
 

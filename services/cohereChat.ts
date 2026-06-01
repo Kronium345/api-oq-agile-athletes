@@ -24,8 +24,9 @@ function getApiKey(): string {
   return key;
 }
 
+/** `command` was retired 2025-09-15; use a current chat model ID. */
 function getModel(): string {
-  return process.env.COHERE_MODEL?.trim() || 'command';
+  return process.env.COHERE_MODEL?.trim() || 'command-r7b-12-2024';
 }
 
 function getTimeoutMs(): number {
@@ -75,9 +76,6 @@ export async function generateCohereReply(
         chat_history: history,
         prompt_truncation: 'AUTO',
         stream: false,
-        citation_quality: 'accurate',
-        connectors: [],
-        documents: [],
       },
       {
         headers: {
@@ -108,9 +106,22 @@ export async function generateCohereReply(
       const axiosErr = error as AxiosError<{ message?: string }>;
       const status = axiosErr.response?.status;
       const detail = axiosErr.response?.data;
+      const cohereMessage =
+        typeof detail === 'object' && detail && 'message' in detail
+          ? String((detail as { message: string }).message)
+          : typeof detail === 'string'
+            ? detail
+            : axiosErr.message;
 
       if (status === 401 || status === 403) {
         throw new CohereChatError('Cohere authentication failed. Check COHERE_API_KEY.', status, detail);
+      }
+      if (status === 404) {
+        throw new CohereChatError(
+          `Cohere model not found or retired. Set COHERE_MODEL to a current model (e.g. command-r7b-12-2024). ${cohereMessage}`,
+          404,
+          detail
+        );
       }
       if (status === 429) {
         throw new CohereChatError('Cohere rate limit exceeded. Try again shortly.', 429, detail);
@@ -120,7 +131,7 @@ export async function generateCohereReply(
       }
 
       throw new CohereChatError(
-        'Failed to generate response from Cohere',
+        cohereMessage || 'Failed to generate response from Cohere',
         status || 502,
         detail
       );

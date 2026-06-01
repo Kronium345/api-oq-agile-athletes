@@ -29,7 +29,7 @@ router.get('/status', async (_req, res) => {
         success: true,
         service: 'ai-trainer-chat',
         cohereConfigured,
-        model: process.env.COHERE_MODEL || 'command',
+        model: process.env.COHERE_MODEL || 'command-r7b-12-2024',
         rateLimitPerMinute: Number(process.env.CHAT_RATE_LIMIT_PER_MINUTE || 15),
         endpoints: {
             generate: 'POST /chat/generate',
