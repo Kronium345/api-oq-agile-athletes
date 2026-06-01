@@ -12,9 +12,12 @@ import { stripDataUrlPrefix } from '../services/clarifaiClient.ts';
 import {
   analyzeImage,
   foodKeywords,
+  isFoodScanResult,
+  mapFoodItemForResponse,
   nutrientsWithAliases,
   type FoodItemWithNutrition,
 } from '../services/foodService.ts';
+import { getFoodVisionProvider } from '../services/foodVisionClient.ts';
 import {
   foodAnalysisErrorToHttp,
   isFoodAnalysisServiceError,
@@ -80,11 +83,28 @@ router.post('/analyze', async (req: Request, res: Response) => {
 
   try {
     const imageBase64 = stripDataUrlPrefix(imagePath);
-    const foodItems = await analyzeImage(imageBase64);
-    const validFoodItems = foodItems.filter((item) => item.nutrients !== null);
+    const provider = getFoodVisionProvider();
+    const analysis = await analyzeImage(imageBase64);
 
-    const saved = await createFoodScan(userId, validFoodItems);
-    return res.status(201).json(mapScanForResponse(saved));
+    if (!isFoodScanResult(analysis, provider) || !analysis.primary?.nutrients) {
+      return res.status(422).json({
+        success: false,
+        message:
+          analysis.identificationMessage ||
+          'Could not identify food or find nutrition data. Try another photo.',
+        primary: analysis.primary ? mapFoodItemForResponse(analysis.primary) : null,
+        alternates: analysis.alternates.map(mapFoodItemForResponse),
+      });
+    }
+
+    const saved = await createFoodScan(userId, [analysis.primary]);
+    const mapped = mapScanForResponse(saved);
+    return res.status(201).json({
+      ...mapped,
+      primary: mapFoodItemForResponse(analysis.primary),
+      alternates: analysis.alternates.map(mapFoodItemForResponse),
+      foodItems: [mapFoodItemForResponse(analysis.primary)],
+    });
   } catch (error: unknown) {
     if (isFoodAnalysisServiceError(error)) {
       console.error('Food analysis error:', error.statusCode, error.message);

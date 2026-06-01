@@ -2,7 +2,8 @@ import express from 'express';
 import { ObjectId } from 'mongodb';
 import { createFoodScan, deleteFoodScan, findScansInRange, getFoodScanById, getFoodScansByUserId, serializeScan, } from "../models/foodScan.js";
 import { stripDataUrlPrefix } from "../services/clarifaiClient.js";
-import { analyzeImage, foodKeywords, nutrientsWithAliases, } from "../services/foodService.js";
+import { analyzeImage, foodKeywords, isFoodScanResult, mapFoodItemForResponse, nutrientsWithAliases, } from "../services/foodService.js";
+import { getFoodVisionProvider } from "../services/foodVisionClient.js";
 import { foodAnalysisErrorToHttp, isFoodAnalysisServiceError, } from "../utils/foodAnalysisErrors.js";
 import { endOfDay, endOfMonth, endOfWeek, formatYyyyMmDd, parseYyyyMmDd, startOfDay, startOfMonth, startOfWeek, } from "../utils/dateRanges.js";
 import { routeParam } from "../utils/routeParams.js";
@@ -49,10 +50,25 @@ router.post('/analyze', async (req, res) => {
     }
     try {
         const imageBase64 = stripDataUrlPrefix(imagePath);
-        const foodItems = await analyzeImage(imageBase64);
-        const validFoodItems = foodItems.filter((item) => item.nutrients !== null);
-        const saved = await createFoodScan(userId, validFoodItems);
-        return res.status(201).json(mapScanForResponse(saved));
+        const provider = getFoodVisionProvider();
+        const analysis = await analyzeImage(imageBase64);
+        if (!isFoodScanResult(analysis, provider) || !analysis.primary?.nutrients) {
+            return res.status(422).json({
+                success: false,
+                message: analysis.identificationMessage ||
+                    'Could not identify food or find nutrition data. Try another photo.',
+                primary: analysis.primary ? mapFoodItemForResponse(analysis.primary) : null,
+                alternates: analysis.alternates.map(mapFoodItemForResponse),
+            });
+        }
+        const saved = await createFoodScan(userId, [analysis.primary]);
+        const mapped = mapScanForResponse(saved);
+        return res.status(201).json({
+            ...mapped,
+            primary: mapFoodItemForResponse(analysis.primary),
+            alternates: analysis.alternates.map(mapFoodItemForResponse),
+            foodItems: [mapFoodItemForResponse(analysis.primary)],
+        });
     }
     catch (error) {
         if (isFoodAnalysisServiceError(error)) {

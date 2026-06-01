@@ -1,6 +1,9 @@
 /**
- * Mental wellness assessment classifier.
- * Maps frontend quiz answers (s3–s11 risk, s12–s18 anger, s19–s25 anxiety) to four outcome labels.
+ * Mind Center — mental wellness assessment classifier.
+ * Maps quiz answers (s3–s11 risk context, s12–s18 anger 0–4, s19–s25 anxiety 0–3)
+ * to the 4-class anger × anxiety matrix in data/quizCategories.json.
+ *
+ * Replaces legacy fitness-one-server getPrediction (angerAnxiety / exercise / doctor keys).
  */
 
 export const OUTCOME_CATEGORIES = [

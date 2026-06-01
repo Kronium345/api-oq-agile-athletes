@@ -59,11 +59,47 @@ async function getCategoryByName(category: string): Promise<QuizCategory | null>
   return getCategoriesCollection().findOne({ category });
 }
 
+async function getCategoryByLabel(label: number): Promise<QuizCategory | null> {
+  return getCategoriesCollection().findOne({ label });
+}
+
+async function getAllCategories(): Promise<QuizCategory[]> {
+  return getCategoriesCollection().find({}).sort({ label: 1 }).toArray();
+}
+
+async function countCategories(): Promise<number> {
+  return getCategoriesCollection().countDocuments();
+}
+
+async function clearQuestions(): Promise<void> {
+  await getQuestionsCollection().deleteMany({});
+}
+
+async function clearCategories(): Promise<void> {
+  await getCategoriesCollection().deleteMany({});
+}
+
+/** Shape expected by Mind Center Quiz.jsx (selected cleared per session). */
+function normalizeQuestionForApi(question: QuizQuestion): QuizQuestion {
+  return {
+    name: question.name,
+    text: question.text,
+    options: question.options,
+    selected: question.selected ?? null,
+  };
+}
+
 export {
+  clearCategories,
+  clearQuestions,
+  countCategories,
   countQuestions,
+  getAllCategories,
   getAllQuestions,
   getCategoriesCollection,
+  getCategoryByLabel,
   getCategoryByName,
   insertCategories,
   insertQuestions,
+  normalizeQuestionForApi,
 };

@@ -22,12 +22,13 @@ export interface FoodVisionConcept {
 }
 
 export interface FoodVisionPredictResult {
+  primaryConcept: FoodVisionConcept;
   concepts: FoodVisionConcept[];
   model: string;
   inferenceMs: number;
 }
 
-/** Shape expected by existing foodService filters (Clarifai-compatible). */
+/** Shape expected by legacy filters (Clarifai-compatible). */
 export interface ClarifaiLikeConcept {
   name: string;
   value: number;
@@ -70,8 +71,17 @@ function getTimeoutMs(): number {
   return Number(process.env.FOOD_VISION_TIMEOUT_MS || 60_000);
 }
 
-export function toClarifaiConcepts(concepts: FoodVisionConcept[]): ClarifaiLikeConcept[] {
-  return concepts.map((c) => ({ name: c.name, value: c.confidence }));
+function parseConcept(raw: { name?: string; confidence?: number } | undefined): FoodVisionConcept | null {
+  if (!raw?.name || typeof raw.confidence !== 'number') return null;
+  return { name: String(raw.name), confidence: Number(raw.confidence) };
+}
+
+export function toClarifaiConcepts(
+  primary: FoodVisionConcept,
+  concepts: FoodVisionConcept[]
+): ClarifaiLikeConcept[] {
+  const others = concepts.filter((c) => c.name !== primary.name);
+  return [primary, ...others].map((c) => ({ name: c.name, value: c.confidence }));
 }
 
 function parseDetail(data: unknown): string | undefined {
@@ -138,6 +148,7 @@ export async function predictFood(imageBase64: string): Promise<FoodVisionPredic
 
   try {
     const response = await axios.post<{
+      primaryConcept?: { name?: string; confidence?: number };
       concepts?: Array<{ name?: string; confidence?: number }>;
       model?: string;
       inferenceMs?: number;
@@ -157,14 +168,25 @@ export async function predictFood(imageBase64: string): Promise<FoodVisionPredic
     );
 
     const concepts = (response.data?.concepts || [])
-      .filter((c) => c.name && typeof c.confidence === 'number')
-      .map((c) => ({
-        name: String(c.name),
-        confidence: Number(c.confidence),
-      }));
+      .map((c) => parseConcept(c))
+      .filter((c): c is FoodVisionConcept => c !== null);
+
+    let primaryConcept = parseConcept(response.data?.primaryConcept);
+
+    if (!primaryConcept && concepts.length > 0) {
+      primaryConcept = [...concepts].sort((a, b) => b.confidence - a.confidence)[0];
+    }
+
+    if (!primaryConcept) {
+      throw new FoodVisionError('No food prediction from vision service.', 502);
+    }
+
+    const conceptsWithPrimary =
+      concepts.length > 0 ? concepts : [primaryConcept];
 
     return {
-      concepts,
+      primaryConcept,
+      concepts: conceptsWithPrimary,
       model: response.data?.model || 'unknown',
       inferenceMs: response.data?.inferenceMs ?? 0,
     };
@@ -190,10 +212,7 @@ export async function predictFood(imageBase64: string): Promise<FoodVisionPredic
     }
 
     const err = error as Error;
-    throw new FoodVisionError(
-      `Food vision request failed: ${err.message}`,
-      502
-    );
+    throw new FoodVisionError(`Food vision request failed: ${err.message}`, 502);
   }
 }
 

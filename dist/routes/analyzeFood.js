@@ -2,7 +2,8 @@ import express from 'express';
 import fs from 'fs';
 import path from 'path';
 import { stripDataUrlPrefix } from "../services/clarifaiClient.js";
-import { analyzeImage, foodKeywords, nutrientsWithAliases, } from "../services/foodService.js";
+import { analyzeImage, isFoodScanResult, mapFoodItemForResponse, } from "../services/foodService.js";
+import { getFoodVisionProvider } from "../services/foodVisionClient.js";
 import { foodAnalysisErrorToHttp, isFoodAnalysisServiceError, } from "../utils/foodAnalysisErrors.js";
 const router = express.Router();
 const JOKES = [
@@ -22,32 +23,27 @@ router.post('/', async (req, res) => {
         fs.mkdirSync(uploadsDir, { recursive: true });
         const filename = path.join(uploadsDir, `${Date.now()}.jpg`);
         fs.writeFileSync(filename, buffer);
-        const rawFoodItems = await analyzeImage(imageBase64);
-        const filteredFoodItems = (rawFoodItems || []).filter((item) => {
-            const name = item.name?.toLowerCase().trim() || '';
-            const passesConfidence = item.confidence >= 0.25;
-            const hasName = name.length >= 2 && /^[a-zA-Z\s\-]+$/.test(name);
-            const keywordMatch = foodKeywords.some((keyword) => name.includes(keyword));
-            return hasName && (keywordMatch || passesConfidence);
-        });
-        const isFood = filteredFoodItems.length > 0 &&
-            (filteredFoodItems.length > 1 || filteredFoodItems[0].confidence >= 0.3);
-        if (!isFood) {
+        const provider = getFoodVisionProvider();
+        const analysis = await analyzeImage(imageBase64);
+        if (!isFoodScanResult(analysis, provider)) {
             const randomJoke = JOKES[Math.floor(Math.random() * JOKES.length)];
             return res.status(200).json({
                 isFood: false,
-                joke: randomJoke,
+                joke: analysis.identificationMessage || randomJoke,
                 foodItems: [],
+                primary: null,
+                alternates: [],
                 path: filename,
             });
         }
-        const foodItems = filteredFoodItems.map((item) => ({
-            ...item,
-            nutrients: item.nutrients ? nutrientsWithAliases(item.nutrients) : null,
-        }));
+        const primary = mapFoodItemForResponse(analysis.primary);
+        const alternates = analysis.alternates.map(mapFoodItemForResponse);
         return res.status(200).json({
             isFood: true,
-            foodItems,
+            primary,
+            alternates,
+            /** Only the primary item — do not sum alternates for meal totals. */
+            foodItems: [primary],
             path: filename,
         });
     }

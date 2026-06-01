@@ -7,7 +7,6 @@ import {
 import {
   getFoodVisionProvider,
   predictFood,
-  toClarifaiConcepts,
   type ClarifaiLikeConcept,
   type FoodVisionProvider,
 } from './foodVisionClient.ts';
@@ -17,6 +16,10 @@ const USDA_API_KEY = process.env.USDA_API_KEY || '';
 
 const FOOD_MODEL_URL =
   'https://api.clarifai.com/v2/models/food-item-recognition/versions/1d5fd481e0cf4826aa72ec3ff049e044/outputs';
+
+const HTTP_IS_FOOD_CONFIDENCE = Number(process.env.FOOD_SCAN_IS_FOOD_CONFIDENCE || 0.5);
+const UNCERTAIN_CONFIDENCE = Number(process.env.FOOD_SCAN_UNCERTAIN_CONFIDENCE || 0.6);
+const MAX_ALTERNATES = Number(process.env.FOOD_SCAN_MAX_ALTERNATES || 4);
 
 export const foodKeywords = [
   'pizza', 'burger', 'sandwich', 'salad', 'pasta', 'sushi', 'cake', 'cookie',
@@ -29,9 +32,10 @@ export const foodKeywords = [
   'omelette', 'milkshake', 'dal', 'biryani', 'naan', 'roti',
   'paneer', 'samosa', 'dosa', 'idli', 'vada', 'chutney', 'gravy',
   'kebab', 'shawarma', 'falafel', 'hummus', 'pulao', 'khichdi', 'paratha',
-  // Common Food-101 dish names (Python ONNX model)
   'lasagna', 'ramen', 'dumpling', 'donut', 'hamburger', 'hot dog', 'wonton',
   'pad thai', 'pho', 'risotto', 'tiramisu', 'cheesecake', 'miso', 'sashimi',
+  'chicken wings', 'grilled salmon', 'fried chicken', 'roast chicken', 'beef',
+  'pork', 'lamb', 'turkey', 'shrimp', 'salmon', 'tuna', 'wrap', 'bowl',
 ];
 
 export interface FoodNutrients {
@@ -47,6 +51,19 @@ export interface FoodItemWithNutrition {
   name: string;
   confidence: number;
   nutrients: FoodNutrients | null;
+}
+
+/** Vision + USDA result — meal totals must use `primary` only, not sum `alternates`. */
+export interface FoodScanAnalysisResult {
+  primary: FoodItemWithNutrition | null;
+  alternates: FoodItemWithNutrition[];
+  /**
+   * Backward-compatible list for clients that read `foodItems`.
+   * Contains only `primary` so totals are not inflated by summing alternates.
+   */
+  foodItems: FoodItemWithNutrition[];
+  uncertainIdentification: boolean;
+  identificationMessage?: string;
 }
 
 function defaultNutrients(): FoodNutrients {
@@ -94,6 +111,20 @@ function extractNutrients(foodData: {
   }
 
   return nutrients;
+}
+
+export function matchesFoodKeywords(name: string): boolean {
+  const normalized = name.toLowerCase().trim();
+  return foodKeywords.some((keyword) => normalized.includes(keyword));
+}
+
+export function isUncertainFoodIdentification(
+  name: string,
+  confidence: number,
+  provider: FoodVisionProvider
+): boolean {
+  if (provider !== 'http') return false;
+  return confidence < UNCERTAIN_CONFIDENCE && !matchesFoodKeywords(name);
 }
 
 export async function getNutritionInfo(foodItem: {
@@ -150,10 +181,6 @@ async function getClarifaiFoodConcepts(cleanBase64: string): Promise<ClarifaiLik
   }));
 }
 
-/**
- * Food-101 ONNX labels may not match foodKeywords; use a lower bar for the http provider.
- * Clarifai path keeps the original 0.6 threshold when there is no keyword match.
- */
 function filterFoodConcepts(
   concepts: ClarifaiLikeConcept[],
   provider: FoodVisionProvider
@@ -162,46 +189,138 @@ function filterFoodConcepts(
 
   return concepts.filter((concept) => {
     const conceptName = (concept.name || '').toLowerCase();
-    if (foodKeywords.some((keyword) => conceptName.includes(keyword))) {
+    if (matchesFoodKeywords(conceptName)) {
       return true;
     }
     return (concept.value ?? 0) >= minConfidenceWithoutKeyword;
   });
 }
 
-export async function analyzeImage(imageBase64: string): Promise<FoodItemWithNutrition[]> {
+function conceptToFoodItem(concept: { name: string; confidence: number }): {
+  name: string;
+  confidence: number;
+} {
+  return { name: concept.name, confidence: concept.confidence };
+}
+
+async function buildAnalysisFromPrimaryAndAlternates(
+  primaryConcept: { name: string; confidence: number },
+  alternateConcepts: Array<{ name: string; confidence: number }>,
+  provider: FoodVisionProvider
+): Promise<FoodScanAnalysisResult> {
+  const uncertain = isUncertainFoodIdentification(
+    primaryConcept.name,
+    primaryConcept.confidence,
+    provider
+  );
+
+  if (uncertain) {
+    return {
+      primary: null,
+      alternates: [],
+      foodItems: [],
+      uncertainIdentification: true,
+      identificationMessage:
+        'Could not identify food confidently — try another angle or better lighting.',
+    };
+  }
+
+  const primary = await getNutritionInfo(conceptToFoodItem(primaryConcept));
+
+  const alternates = await Promise.all(
+    alternateConcepts.slice(0, MAX_ALTERNATES).map((c) => getNutritionInfo(conceptToFoodItem(c)))
+  );
+
+  return {
+    primary,
+    alternates,
+    foodItems: [primary],
+    uncertainIdentification: false,
+  };
+}
+
+function pickPrimaryConcept(concepts: ClarifaiLikeConcept[]): ClarifaiLikeConcept | null {
+  if (concepts.length === 0) return null;
+  return [...concepts].sort((a, b) => (b.value ?? 0) - (a.value ?? 0))[0];
+}
+
+function alternateConceptsFromList(
+  concepts: ClarifaiLikeConcept[],
+  primary: ClarifaiLikeConcept
+): Array<{ name: string; confidence: number }> {
+  return concepts
+    .filter((c) => c.name !== primary.name)
+    .map((c) => ({ name: c.name, confidence: c.value ?? 0 }));
+}
+
+export async function analyzeImage(imageBase64: string): Promise<FoodScanAnalysisResult> {
   const stripped = stripDataUrlPrefix(imageBase64);
   const cleanBase64 = await prepareFoodScanBase64(stripped);
   assertReasonableImageBase64(cleanBase64);
 
   const provider = getFoodVisionProvider();
-  let concepts: ClarifaiLikeConcept[];
 
   if (provider === 'http') {
     const result = await predictFood(cleanBase64);
-    concepts = toClarifaiConcepts(result.concepts);
+    const { primaryConcept, concepts } = result;
+
     console.log('[food-vision] predict', {
       model: result.model,
       inferenceMs: result.inferenceMs,
-      conceptCount: concepts.length,
+      primary: primaryConcept.name,
+      primaryConfidence: primaryConcept.confidence,
+      alternateCount: concepts.filter((c) => c.name !== primaryConcept.name).length,
     });
-  } else {
-    concepts = await getClarifaiFoodConcepts(cleanBase64);
+
+    const alternateConcepts = concepts
+      .filter((c) => c.name !== primaryConcept.name)
+      .map((c) => ({ name: c.name, confidence: c.confidence }));
+
+    return buildAnalysisFromPrimaryAndAlternates(
+      primaryConcept,
+      alternateConcepts,
+      provider
+    );
   }
 
-  const filteredConcepts = filterFoodConcepts(concepts, provider);
+  const rawConcepts = await getClarifaiFoodConcepts(cleanBase64);
+  const filtered = filterFoodConcepts(rawConcepts, provider);
+  const primaryConcept = pickPrimaryConcept(filtered);
 
-  const enrichedFoods = await Promise.all(
-    filteredConcepts.map(async (concept) => {
-      const foodItem = {
-        name: concept.name,
-        confidence: concept.value,
-      };
-      return getNutritionInfo(foodItem);
-    })
-  );
+  if (!primaryConcept) {
+    return {
+      primary: null,
+      alternates: [],
+      foodItems: [],
+      uncertainIdentification: true,
+      identificationMessage: 'No food items detected in the image.',
+    };
+  }
 
-  return enrichedFoods;
+  const primary = { name: primaryConcept.name, confidence: primaryConcept.value ?? 0 };
+  const alternates = alternateConceptsFromList(filtered, primaryConcept);
+
+  return buildAnalysisFromPrimaryAndAlternates(primary, alternates, provider);
+}
+
+/** Whether the scan should be treated as food (HTTP provider uses primary confidence). */
+export function isFoodScanResult(
+  analysis: FoodScanAnalysisResult,
+  provider: FoodVisionProvider
+): boolean {
+  if (analysis.uncertainIdentification || !analysis.primary) {
+    return false;
+  }
+
+  if (provider === 'http') {
+    return analysis.primary.confidence >= HTTP_IS_FOOD_CONFIDENCE;
+  }
+
+  const name = analysis.primary.name?.toLowerCase().trim() || '';
+  const passesConfidence = analysis.primary.confidence >= 0.25;
+  const hasName = name.length >= 2 && /^[a-zA-Z\s\-]+$/.test(name);
+  const keywordMatch = matchesFoodKeywords(name);
+  return hasName && (keywordMatch || passesConfidence) && analysis.primary.confidence >= 0.3;
 }
 
 /** UI-friendly aliases (scan service uses protein/carbs/fats). */
@@ -211,5 +330,12 @@ export function nutrientsWithAliases(nutrients: FoodNutrients | null) {
     ...nutrients,
     proteins: nutrients.protein,
     carbohydrates: nutrients.carbs,
+  };
+}
+
+export function mapFoodItemForResponse(item: FoodItemWithNutrition) {
+  return {
+    ...item,
+    nutrients: item.nutrients ? nutrientsWithAliases(item.nutrients) : null,
   };
 }

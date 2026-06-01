@@ -1,19 +1,37 @@
 import express, { Request, Response } from 'express';
-import { getCategoryByName, getAllQuestions, insertCategories, insertQuestions } from '../models/quiz.ts';
+import {
+  getAllCategories,
+  getAllQuestions,
+  insertCategories,
+  insertQuestions,
+  normalizeQuestionForApi,
+} from '../models/quiz.ts';
+import { buildQuizPredictResponse } from '../services/quizPredict.ts';
 import { getQuizBootstrapStatus } from '../services/quizBootstrap.ts';
-import { DEFAULT_QUIZ_CATEGORIES, getPrediction } from '../utils/mentalClassifier.ts';
+import { DEFAULT_QUIZ_CATEGORIES } from '../utils/mentalClassifier.ts';
+import { QUIZ_KEY_ORDER, validateQuizFeatures } from '../utils/quizValidation.ts';
 
 const router = express.Router();
 
+function sortQuestions<T extends { name: string }>(questions: T[]): T[] {
+  return [...questions].sort((a, b) => {
+    const ai = QUIZ_KEY_ORDER[a.name] ?? 999;
+    const bi = QUIZ_KEY_ORDER[b.name] ?? 999;
+    return ai - bi;
+  });
+}
+
+/** Mind Center readiness — questions + 4 outcome categories. */
 router.get('/status', async (_req: Request, res: Response) => {
   try {
     const status = await getQuizBootstrapStatus();
     return res.json({
       success: true,
       ...status,
-      hint:
-        status.questionsCount === 0
-          ? 'POST /quiz/addQuestions with your app question array (from components/Quiz/questions.js)'
+      hint: !status.readyForQuizUi
+        ? 'Questions missing — restart server to auto-seed or POST /quiz/addQuestions with data/quizQuestions.json'
+        : !status.readyForPredict
+          ? 'Categories missing or legacy — restart server to auto-repair or POST /quiz/addCategories'
           : undefined,
     });
   } catch (error: unknown) {
@@ -22,13 +40,28 @@ router.get('/status', async (_req: Request, res: Response) => {
   }
 });
 
+/** All 23 questions for Assessment UI (compatible with legacy Quiz.jsx). */
 router.get('/quiz', async (_req: Request, res: Response) => {
   try {
-    const questions = await getAllQuestions();
+    const questions = sortQuestions(await getAllQuestions()).map(normalizeQuestionForApi);
     return res.json(questions);
   } catch (error: unknown) {
     console.error('Failed to fetch questions:', error);
     return res.status(500).json({ error: 'Failed to fetch questions' });
+  }
+});
+
+/** Four outcome rows (anger × anxiety matrix). */
+router.get('/categories', async (_req: Request, res: Response) => {
+  try {
+    const categories = await getAllCategories();
+    if (categories.length === 0) {
+      return res.json(DEFAULT_QUIZ_CATEGORIES);
+    }
+    return res.json(categories);
+  } catch (error: unknown) {
+    const err = error as Error;
+    return res.status(500).json({ success: false, message: err.message });
   }
 });
 
@@ -38,7 +71,11 @@ router.post('/addQuestions', async (req: Request, res: Response) => {
     if (!Array.isArray(questionsData)) {
       return res.status(400).json({ msg: 'Request body must be an array of questions' });
     }
-    const result = await insertQuestions(questionsData);
+    const normalized = questionsData.map((q) => ({
+      ...q,
+      selected: q.selected ?? null,
+    }));
+    const result = await insertQuestions(normalized);
     return res.status(201).json({ msg: 'Questions added successfully', result });
   } catch (error: unknown) {
     const err = error as Error;
@@ -60,50 +97,53 @@ router.post('/addCategories', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * Classify anger/anxiety assessment.
+ * Body: { s3: 0|1, ..., s25: 0-3 } — all 23 keys required (matches Quiz.jsx submit).
+ */
 router.post('/predict', async (req: Request, res: Response) => {
   const features = req.body as Record<string, unknown>;
-  console.log('Features for prediction:', features);
+
+  if (!features || typeof features !== 'object' || Array.isArray(features)) {
+    return res.status(400).json({
+      msg: 'error',
+      message: 'Request body must be a JSON object of question answers',
+    });
+  }
+
+  const validation = validateQuizFeatures(features);
+  if (!validation.valid) {
+    return res.status(400).json({
+      msg: 'error',
+      message: 'All 23 assessment answers (s3–s25) are required',
+      missing: validation.missing,
+      invalid: validation.invalid,
+    });
+  }
 
   try {
-    const prediction = getPrediction(features);
-    console.log('Calculated prediction:', prediction.prediction);
+    const response = await buildQuizPredictResponse(features);
 
-    const category = await getCategoryByName(prediction.prediction);
-    console.log('Category from DB:', category);
-
-    if (category) {
-      return res.json({
-        msg: 'success',
-        prediction: prediction.prediction,
-        label: prediction.label,
-        category: category.category,
-        description: category.description,
-        suggestion: category.suggestion,
+    if (!response) {
+      return res.status(404).json({
+        msg: 'error',
+        message: 'Category not found for prediction',
+        hint: 'Ensure MongoDB has 4 categories (GET /quiz/status). Server auto-seeds on startup.',
       });
     }
 
-    const fallback = DEFAULT_QUIZ_CATEGORIES.find((c) => c.category === prediction.prediction);
-    if (fallback) {
-      return res.json({
-        msg: 'success',
-        prediction: prediction.prediction,
-        label: prediction.label,
-        category: fallback.category,
-        description: fallback.description,
-        suggestion: fallback.suggestion,
-        source: 'default',
-      });
-    }
-
-    return res.status(404).json({
-      success: false,
-      message: 'Category not found',
-      prediction: prediction.prediction,
-      label: prediction.label,
-      hint: 'Seed categories with POST /quiz/addCategories or restart server to auto-seed',
+    console.log('[quiz] predict', {
+      label: response.label,
+      category: response.category,
+      angerSum: response.scores.angerSum,
+      anxietySum: response.scores.anxietySum,
+      source: response.source,
     });
+
+    return res.json(response);
   } catch (error: unknown) {
     const err = error as Error;
+    console.error('[quiz] predict error:', err.message);
     return res.status(500).json({ msg: 'error', error: err.message });
   }
 });

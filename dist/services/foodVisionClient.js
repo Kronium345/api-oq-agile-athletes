@@ -33,8 +33,14 @@ function getFoodVisionApiKey() {
 function getTimeoutMs() {
     return Number(process.env.FOOD_VISION_TIMEOUT_MS || 60000);
 }
-export function toClarifaiConcepts(concepts) {
-    return concepts.map((c) => ({ name: c.name, value: c.confidence }));
+function parseConcept(raw) {
+    if (!raw?.name || typeof raw.confidence !== 'number')
+        return null;
+    return { name: String(raw.name), confidence: Number(raw.confidence) };
+}
+export function toClarifaiConcepts(primary, concepts) {
+    const others = concepts.filter((c) => c.name !== primary.name);
+    return [primary, ...others].map((c) => ({ name: c.name, value: c.confidence }));
 }
 function parseDetail(data) {
     if (data && typeof data === 'object' && 'detail' in data) {
@@ -87,13 +93,19 @@ export async function predictFood(imageBase64) {
             validateStatus: (s) => s >= 200 && s < 300,
         });
         const concepts = (response.data?.concepts || [])
-            .filter((c) => c.name && typeof c.confidence === 'number')
-            .map((c) => ({
-            name: String(c.name),
-            confidence: Number(c.confidence),
-        }));
+            .map((c) => parseConcept(c))
+            .filter((c) => c !== null);
+        let primaryConcept = parseConcept(response.data?.primaryConcept);
+        if (!primaryConcept && concepts.length > 0) {
+            primaryConcept = [...concepts].sort((a, b) => b.confidence - a.confidence)[0];
+        }
+        if (!primaryConcept) {
+            throw new FoodVisionError('No food prediction from vision service.', 502);
+        }
+        const conceptsWithPrimary = concepts.length > 0 ? concepts : [primaryConcept];
         return {
-            concepts,
+            primaryConcept,
+            concepts: conceptsWithPrimary,
             model: response.data?.model || 'unknown',
             inferenceMs: response.data?.inferenceMs ?? 0,
         };
