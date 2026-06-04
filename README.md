@@ -42,7 +42,9 @@ Legacy routes **`/auth/signup`** and **`/auth/signin`** remain for older clients
 
 ## Workflow email (Upstash + Nodemailer)
 
-Scheduled fitness emails and password reset share one Gmail transporter. See **`WORKFLOW_EMAIL_API.md`**.
+**`POST /auth/register`** and **`POST /auth/signup`** send a one-time welcome email (non-blocking) when `EMAIL_USER` and `EMAIL_APP_PASSWORD` are set.
+
+Scheduled fitness emails and password reset share the same Gmail transporter. See **`WORKFLOW_EMAIL_API.md`**.
 
 Expo web for email links: copy **`EAS_HOSTING_FRONTEND_PROMPT.md`** into your mobile repo, deploy with EAS Hosting, then set Render `FRONTEND_URL` to that HTTPS URL.
 

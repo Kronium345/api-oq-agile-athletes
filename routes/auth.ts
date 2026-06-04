@@ -12,8 +12,10 @@ import {
 } from '../models/user.ts';
 import { isEmailConfigured } from '../config/nodemailer.ts';
 import { sendPasswordResetEmail } from '../utils/send-email.ts';
+import { dispatchWelcomeEmail } from '../utils/dispatchWelcomeEmail.ts';
 import { signAuthToken } from '../utils/jwt.ts';
 import { toClientUser } from '../utils/userResponse.ts';
+import { getDisplayName } from '../utils/userDisplay.ts';
 
 const router = express.Router();
 
@@ -86,6 +88,8 @@ router.post('/register', async (req: Request<{}, {}, RegisterRequestBody>, res: 
       username: username?.trim(),
     });
 
+    dispatchWelcomeEmail(user.email, getDisplayName(user));
+
     const client = toClientUser(user);
     return res.status(201).json({
       result: client,
@@ -149,6 +153,7 @@ router.post('/signup', async (req: Request<{}, {}, SignUpRequestBody>, res: Resp
     }
 
     const user = await createUser({ name, email, password });
+    dispatchWelcomeEmail(user.email, getDisplayName(user));
     const payload = authPayload(user);
 
     return res.status(201).json({

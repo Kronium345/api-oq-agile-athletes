@@ -2,6 +2,14 @@ import dayjs from 'dayjs';
 import transporter, { accountEmail, isEmailConfigured } from '../config/nodemailer.ts';
 import { emailTemplates, type EmailTemplateLabel } from './email-template.ts';
 
+export function appDisplayName(): string {
+  return (
+    process.env.APP_DISPLAY_NAME?.trim() ||
+    process.env.ACCOUNT_DELETION_APP_NAME?.trim() ||
+    'OQ Agile Athletes'
+  );
+}
+
 function frontendBase(): string {
   let url = (process.env.FRONTEND_URL || 'https://api-oq-agile-athletes.onrender.com')
     .trim()
@@ -113,12 +121,75 @@ export const sendGoalAchievementEmail = (to: string, data: FitnessEmailData) =>
 export const sendStreakMilestoneEmail = (to: string, data: FitnessEmailData) =>
   sendFitnessReminderEmail({ to, type: 'Streak milestone', fitnessData: data });
 
+function buildWelcomeEmailHtml(userName: string, appLink: string): string {
+  const appName = appDisplayName();
+  const safeName = userName.replace(/[<>&]/g, '');
+  return `
+    <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; background-color: #f0f8f0;">
+      <table cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color: #ffffff; border-radius: 15px; overflow: hidden; box-shadow: 0 6px 12px rgba(0,0,0,0.08);">
+        <tr>
+          <td style="background: linear-gradient(135deg, #4CAF50 0%, #2E7D32 100%); text-align: center; padding: 28px;">
+            <h1 style="color: white; font-size: 28px; margin: 0;">Welcome to ${appName}</h1>
+            <p style="color: rgba(255,255,255,0.9); font-size: 15px; margin: 10px 0 0;">Your fitness journey starts here</p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding: 32px 28px;">
+            <p style="font-size: 17px; margin: 0 0 16px;">Hi <strong style="color: #2E7D32;">${safeName}</strong>,</p>
+            <p style="margin: 0 0 16px;">Thanks for joining us — we're glad you're here. Finish setting up your profile in the app, then explore what ${appName} can do for you:</p>
+            <ul style="margin: 0 0 20px; padding-left: 20px; color: #444;">
+              <li><strong>Steps &amp; goals</strong> — track daily movement, streaks, and progress</li>
+              <li><strong>Leaderboards</strong> — stay motivated with friends</li>
+              <li><strong>Food scan</strong> — log meals and nutrition from photos</li>
+              <li><strong>Workouts &amp; Mind Center</strong> — training and mental wellness in one place</li>
+            </ul>
+            <p style="margin: 0 0 24px; font-size: 15px; color: #555;">We'll send occasional reminders and summaries if you keep notifications on — you can change that anytime in settings.</p>
+            <p style="text-align: center; margin: 0;">
+              <a href="${appLink}" style="background: linear-gradient(135deg, #4CAF50 0%, #2E7D32 100%); color: white; text-decoration: none; padding: 14px 28px; border-radius: 25px; font-weight: 600; display: inline-block;">Open the app</a>
+            </p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding: 0 28px 28px; font-size: 14px; color: #666;">
+            <p style="margin: 0;">Stay strong,<br><strong style="color: #2E7D32;">The ${appName} team</strong></p>
+          </td>
+        </tr>
+      </table>
+    </div>`;
+}
+
+/** Sent once after register/signup. Does not throw when email is unconfigured. */
+export async function sendWelcomeEmail(
+  to: string,
+  userName: string
+): Promise<{ success: boolean; skipped?: boolean; messageId?: string }> {
+  if (!to?.trim()) return { success: false, skipped: true };
+  if (!isEmailConfigured()) {
+    console.warn('[email] skipped welcome — email not configured');
+    return { success: false, skipped: true };
+  }
+
+  const appName = appDisplayName();
+  const appLink = frontendBase();
+  const displayName = userName?.trim() || 'there';
+
+  const info = await transporter.sendMail({
+    from: process.env.EMAIL_FROM || accountEmail,
+    to: to.trim(),
+    subject: `Welcome to ${appName} — let's get moving`,
+    html: buildWelcomeEmailHtml(displayName, appLink),
+  });
+
+  console.log(`[email] sent welcome → ${to}`);
+  return { success: true, messageId: info.messageId };
+}
+
 export async function sendPasswordResetEmail(to: string, resetCode: string): Promise<void> {
   if (!isEmailConfigured()) {
     throw new Error('Email service not configured');
   }
 
-  const appName = process.env.ACCOUNT_DELETION_APP_NAME || 'OQ Agile Athletes';
+  const appName = appDisplayName();
   await transporter.sendMail({
     from: process.env.EMAIL_FROM || accountEmail,
     to,

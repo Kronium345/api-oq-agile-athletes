@@ -5,8 +5,10 @@ import bcrypt from 'bcryptjs';
 import { authenticateUser, authenticateUserByEmailOrUsername, createUser, getUserByEmail, getUserByUsername, updateUser, } from "../models/user.js";
 import { isEmailConfigured } from "../config/nodemailer.js";
 import { sendPasswordResetEmail } from "../utils/send-email.js";
+import { dispatchWelcomeEmail } from "../utils/dispatchWelcomeEmail.js";
 import { signAuthToken } from "../utils/jwt.js";
 import { toClientUser } from "../utils/userResponse.js";
+import { getDisplayName } from "../utils/userDisplay.js";
 const router = express.Router();
 function issueToken(userId, email) {
     return signAuthToken(userId, email);
@@ -45,6 +47,7 @@ router.post('/register', async (req, res) => {
             password,
             username: username?.trim(),
         });
+        dispatchWelcomeEmail(user.email, getDisplayName(user));
         const client = toClientUser(user);
         return res.status(201).json({
             result: client,
@@ -100,6 +103,7 @@ router.post('/signup', async (req, res) => {
             });
         }
         const user = await createUser({ name, email, password });
+        dispatchWelcomeEmail(user.email, getDisplayName(user));
         const payload = authPayload(user);
         return res.status(201).json({
             success: true,
