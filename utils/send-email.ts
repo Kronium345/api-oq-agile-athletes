@@ -10,6 +10,12 @@ export function appDisplayName(): string {
   );
 }
 
+/** Welcome email branding (no "OQ" prefix in titles). */
+export function welcomeAppDisplayName(): string {
+  const name = appDisplayName().replace(/^OQ\s+/i, '').trim();
+  return name || 'Agile Athletes';
+}
+
 function frontendBase(): string {
   let url = (process.env.FRONTEND_URL || 'https://api-oq-agile-athletes.onrender.com')
     .trim()
@@ -122,7 +128,7 @@ export const sendStreakMilestoneEmail = (to: string, data: FitnessEmailData) =>
   sendFitnessReminderEmail({ to, type: 'Streak milestone', fitnessData: data });
 
 function buildWelcomeEmailHtml(userName: string, appLink: string): string {
-  const appName = appDisplayName();
+  const appName = welcomeAppDisplayName();
   const safeName = userName.replace(/[<>&]/g, '');
   return `
     <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; background-color: #f0f8f0;">
@@ -169,7 +175,7 @@ export async function sendWelcomeEmail(
     return { success: false, skipped: true };
   }
 
-  const appName = appDisplayName();
+  const appName = welcomeAppDisplayName();
   const appLink = frontendBase();
   const displayName = userName?.trim() || 'there';
 
