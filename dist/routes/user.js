@@ -6,9 +6,10 @@ import { authenticate } from "../middleware/auth.js";
 import { getUserById, updateUser } from "../models/user.js";
 import { addFriendship, getFriendsList, getSuggestions, removeFriendship, updateStepSharing, } from "../services/stepsSocial.js";
 import { routeParam } from "../utils/routeParams.js";
+import { isValidExperience, isValidGender, toClientUser } from "../utils/userResponse.js";
 const router = express.Router();
 const storage = multer.diskStorage({
-    destination: function (req, file, cb) {
+    destination: function (_req, _file, cb) {
         const avatarDir = path.join('uploads', 'avatars');
         try {
             fs.mkdirSync(avatarDir, { recursive: true });
@@ -18,29 +19,36 @@ const storage = multer.diskStorage({
             cb(error, avatarDir);
         }
     },
-    filename: function (req, file, cb) {
-        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    filename: function (_req, file, cb) {
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
         cb(null, 'avatar-' + uniqueSuffix + path.extname(file.originalname));
-    }
+    },
 });
 const upload = multer({
-    storage: storage,
-    limits: {
-        fileSize: 5 * 1024 * 1024, // 5MB limit
-    },
-    fileFilter: function (req, file, cb) {
-        // Check file type
+    storage,
+    limits: { fileSize: 5 * 1024 * 1024 },
+    fileFilter: function (_req, file, cb) {
         const allowedTypes = /jpeg|jpg|png|gif|webp/;
         const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
         const mimetype = allowedTypes.test(file.mimetype);
         if (mimetype && extname) {
             return cb(null, true);
         }
-        else {
-            cb(new Error('Invalid file type. Only JPEG, PNG, GIF, and WebP are allowed.'));
-        }
-    }
+        cb(new Error('Invalid file type. Only JPEG, PNG, GIF, and WebP are allowed.'));
+    },
 });
+function assertSelfOr403(req, targetId, res) {
+    if (targetId !== req.userId) {
+        res.status(403).json({ success: false, message: 'Unauthorized access' });
+        return false;
+    }
+    return true;
+}
+function avatarPublicPath(relativePath) {
+    const normalized = relativePath.replace(/\\/g, '/');
+    return normalized.startsWith('/') ? normalized : `/${normalized}`;
+}
+// --- Social / steps (existing) ---
 router.get('/suggestions', authenticate, async (req, res) => {
     try {
         const limitRaw = req.query.limit;
@@ -118,17 +126,146 @@ router.put('/step-sharing', authenticate, async (req, res) => {
         return res.status(500).json({ success: false, message: 'Failed to update step sharing' });
     }
 });
-// Get user profile
+router.patch('/:id/gender', authenticate, async (req, res) => {
+    const id = routeParam(req.params.id);
+    if (!assertSelfOr403(req, id, res))
+        return;
+    const { gender } = req.body;
+    if (!gender || !isValidGender(gender)) {
+        return res.status(400).json({ message: 'gender must be Male or Female' });
+    }
+    try {
+        const updatedUser = await updateUser(id, { gender });
+        if (!updatedUser) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+        return res.status(200).json(toClientUser(updatedUser));
+    }
+    catch (error) {
+        const err = error;
+        console.error('Update gender error:', err);
+        return res.status(500).json({ message: 'Something went wrong' });
+    }
+});
+router.patch('/:id/experience', authenticate, async (req, res) => {
+    const id = routeParam(req.params.id);
+    if (!assertSelfOr403(req, id, res))
+        return;
+    const { experience } = req.body;
+    if (!experience || !isValidExperience(experience)) {
+        return res.status(400).json({
+            message: 'experience must be one of: Beginner, Intermediate, Advanced, Pro, Elite',
+        });
+    }
+    try {
+        const updatedUser = await updateUser(id, { experience });
+        if (!updatedUser) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+        return res.status(200).json(toClientUser(updatedUser));
+    }
+    catch (error) {
+        const err = error;
+        console.error('Update experience error:', err);
+        return res.status(500).json({ message: 'Something went wrong' });
+    }
+});
+router.patch('/:id/weight', authenticate, async (req, res) => {
+    const id = routeParam(req.params.id);
+    if (!assertSelfOr403(req, id, res))
+        return;
+    const { weight, unit } = req.body;
+    if (weight == null || Number.isNaN(Number(weight)) || Number(weight) <= 0) {
+        return res.status(400).json({ message: 'weight must be a positive number' });
+    }
+    const resolvedUnit = unit === 'lbs' ? 'lbs' : 'kg';
+    try {
+        const updatedUser = await updateUser(id, {
+            weight: Number(weight),
+            unit: resolvedUnit,
+        });
+        if (!updatedUser) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+        return res.status(200).json(toClientUser(updatedUser));
+    }
+    catch (error) {
+        const err = error;
+        console.error('Update weight error:', err);
+        return res.status(500).json({ message: 'Something went wrong' });
+    }
+});
+router.put('/:id/username', authenticate, async (req, res) => {
+    const id = routeParam(req.params.id);
+    if (!assertSelfOr403(req, id, res))
+        return;
+    const { username } = req.body;
+    if (!username?.trim()) {
+        return res.status(400).json({ message: 'username is required' });
+    }
+    try {
+        const updatedUser = await updateUser(id, { username: username.trim() });
+        if (!updatedUser) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+        return res.status(200).json(toClientUser(updatedUser));
+    }
+    catch (error) {
+        const err = error;
+        console.error('Update username error:', err);
+        return res.status(500).json({ message: 'Error updating username' });
+    }
+});
+/** Avatar: multipart file OR JSON `{ "avatar": "https://..." }` for preset icons */
+router.put('/:id/avatar', authenticate, upload.single('avatar'), async (req, res) => {
+    const id = routeParam(req.params.id);
+    if (!assertSelfOr403(req, id, res))
+        return;
+    try {
+        if (req.file) {
+            const avatarPath = `uploads/avatars/${req.file.filename}`;
+            const updatedUser = await updateUser(id, { avatar: avatarPath });
+            if (!updatedUser) {
+                return res.status(404).json({ error: 'User not found' });
+            }
+            const publicPath = avatarPublicPath(avatarPath);
+            return res.json({
+                status: true,
+                message: 'Avatar changed successfully',
+                avatar: publicPath,
+                success: true,
+            });
+        }
+        const bodyAvatar = req.body?.avatar;
+        if (bodyAvatar && typeof bodyAvatar === 'string' && bodyAvatar.startsWith('http')) {
+            const updatedUser = await updateUser(id, { avatar: bodyAvatar.trim() });
+            if (!updatedUser) {
+                return res.status(404).json({ error: 'User not found' });
+            }
+            return res.json({
+                status: true,
+                message: 'Avatar changed successfully',
+                avatar: updatedUser.avatar,
+                success: true,
+            });
+        }
+        return res.status(400).json({
+            success: false,
+            error: 'No avatar file provided. Send multipart field "avatar" or JSON { "avatar": "<url>" }',
+        });
+    }
+    catch (error) {
+        const err = error;
+        console.error('Upload avatar error:', err);
+        return res.status(500).json({ success: false, error: 'Internal server error' });
+    }
+});
+// --- Profile CRUD (existing; `:userId` alias) ---
 router.get('/:userId', authenticate, async (req, res) => {
     try {
         const userId = routeParam(req.params.userId);
-        // Verify user can access this profile
-        if (userId !== req.userId) {
-            return res.status(403).json({
-                success: false,
-                message: 'Unauthorized access',
-            });
-        }
+        if (!assertSelfOr403(req, userId, res))
+            return;
         const user = await getUserById(userId);
         if (!user) {
             return res.status(404).json({
@@ -136,36 +273,32 @@ router.get('/:userId', authenticate, async (req, res) => {
                 message: 'User not found',
             });
         }
-        res.json({
-            success: true,
-            ...user,
-        });
+        const client = toClientUser(user);
+        return res.json(client);
     }
     catch (error) {
-        console.error('Get user profile error:', error);
-        res.status(500).json({
+        const err = error;
+        console.error('Get user profile error:', err);
+        return res.status(500).json({
             success: false,
             message: 'Failed to get user profile',
-            error: error.message,
+            error: err.message,
         });
     }
 });
-// Update user profile
 router.put('/:userId', authenticate, async (req, res) => {
     try {
         const userId = routeParam(req.params.userId);
         const updateData = { ...req.body };
-        // Verify user can update this profile
-        if (userId !== req.userId) {
-            return res.status(403).json({
-                success: false,
-                message: 'Unauthorized access',
-            });
-        }
-        // Remove sensitive fields that shouldn't be updated via this endpoint
+        if (!assertSelfOr403(req, userId, res))
+            return;
         delete updateData.password;
         delete updateData.email;
         delete updateData.userId;
+        if (updateData.experienceLevel && !updateData.experience) {
+            updateData.experience = updateData.experienceLevel;
+            delete updateData.experienceLevel;
+        }
         const updatedUser = await updateUser(userId, updateData);
         if (!updatedUser) {
             return res.status(404).json({
@@ -173,59 +306,19 @@ router.put('/:userId', authenticate, async (req, res) => {
                 message: 'User not found',
             });
         }
-        res.json({
+        return res.json({
             success: true,
             message: 'Profile updated successfully',
-            ...updatedUser,
+            ...toClientUser(updatedUser),
         });
     }
     catch (error) {
-        console.error('Update user profile error:', error);
-        res.status(500).json({
+        const err = error;
+        console.error('Update user profile error:', err);
+        return res.status(500).json({
             success: false,
             message: 'Failed to update user profile',
-            error: error.message,
-        });
-    }
-});
-// Upload avatar
-router.put('/:userId/avatar', authenticate, upload.single('avatar'), async (req, res) => {
-    try {
-        const userId = routeParam(req.params.userId);
-        // Verify user can update this profile
-        if (userId !== req.userId) {
-            return res.status(403).json({
-                success: false,
-                message: 'Unauthorized access',
-            });
-        }
-        if (!req.file) {
-            return res.status(400).json({
-                success: false,
-                message: 'No file uploaded',
-            });
-        }
-        // Update user with new avatar path
-        const avatarPath = `uploads/avatars/${req.file.filename}`;
-        const updatedUser = await updateUser(userId, { avatar: avatarPath });
-        if (!updatedUser) {
-            return res.status(404).json({
-                success: false,
-                message: 'User not found',
-            });
-        }
-        res.json({
-            success: true,
-            message: 'Avatar updated successfully',
-            avatar: avatarPath,
-        });
-    }
-    catch (error) {
-        console.error('Upload avatar error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to upload avatar',
-            error: error.message,
+            error: err.message,
         });
     }
 });

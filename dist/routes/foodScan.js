@@ -2,8 +2,8 @@ import express from 'express';
 import { ObjectId } from 'mongodb';
 import { createFoodScan, deleteFoodScan, findScansInRange, getFoodScanById, getFoodScansByUserId, serializeScan, } from "../models/foodScan.js";
 import { stripDataUrlPrefix } from "../services/clarifaiClient.js";
-import { analyzeImage, foodKeywords, isFoodScanResult, mapFoodItemForResponse, nutrientsWithAliases, } from "../services/foodService.js";
-import { getFoodVisionProvider } from "../services/foodVisionClient.js";
+import { analyzeImage, foodKeywords, getNutritionForFoodName, hasTrustedPrimaryNutrition, isFoodScanResult, mapFoodItemForResponse, nutrientsWithAliases, searchFoodNutrition, } from "../services/foodService.js";
+import { buildFoodScanApiPayload } from "../services/foodScanResponse.js";
 import { foodAnalysisErrorToHttp, isFoodAnalysisServiceError, } from "../utils/foodAnalysisErrors.js";
 import { endOfDay, endOfMonth, endOfWeek, formatYyyyMmDd, parseYyyyMmDd, startOfDay, startOfMonth, startOfWeek, } from "../utils/dateRanges.js";
 import { routeParam } from "../utils/routeParams.js";
@@ -43,6 +43,57 @@ router.post('/', async (req, res) => {
         return res.status(500).json({ message: 'Error creating food scan', error: err.message });
     }
 });
+router.get('/search', async (req, res) => {
+    try {
+        const query = typeof req.query.q === 'string' ? req.query.q : req.query.query;
+        if (!query || !String(query).trim()) {
+            return res.status(400).json({ message: 'Query parameter q (or query) is required' });
+        }
+        const limit = Math.min(Number(req.query.limit) || 8, 20);
+        const results = await searchFoodNutrition(String(query).trim(), limit);
+        return res.status(200).json({
+            query: String(query).trim(),
+            results: results.map((r) => ({
+                name: r.name,
+                fdcId: r.fdcId,
+                nutrients: r.nutrients,
+            })),
+        });
+    }
+    catch (error) {
+        const err = error;
+        return res.status(500).json({ message: 'Could not search foods', error: err.message });
+    }
+});
+/** Save a manually corrected food after a low-confidence scan. */
+router.post('/confirm', async (req, res) => {
+    const { userId, foodName } = req.body;
+    if (!userId || !foodName?.trim()) {
+        return res.status(400).json({ message: 'userId and foodName are required' });
+    }
+    try {
+        const primary = await getNutritionForFoodName(foodName.trim());
+        if (!primary.nutrients) {
+            return res.status(422).json({
+                success: false,
+                message: 'No nutrition data found for that food name. Try a different search.',
+            });
+        }
+        const saved = await createFoodScan(userId, [primary]);
+        const mapped = mapScanForResponse(saved);
+        return res.status(201).json({
+            ...mapped,
+            primary: mapFoodItemForResponse(primary),
+            foodItems: [mapFoodItemForResponse(primary)],
+            identificationQuality: 'high',
+            needsManualSelection: false,
+        });
+    }
+    catch (error) {
+        const err = error;
+        return res.status(500).json({ message: 'Error saving food scan', error: err.message });
+    }
+});
 router.post('/analyze', async (req, res) => {
     const { userId, imagePath } = req.body;
     if (!userId || !imagePath) {
@@ -50,24 +101,31 @@ router.post('/analyze', async (req, res) => {
     }
     try {
         const imageBase64 = stripDataUrlPrefix(imagePath);
-        const provider = getFoodVisionProvider();
         const analysis = await analyzeImage(imageBase64);
-        if (!isFoodScanResult(analysis, provider) || !analysis.primary?.nutrients) {
+        if (!isFoodScanResult(analysis)) {
             return res.status(422).json({
                 success: false,
                 message: analysis.identificationMessage ||
-                    'Could not identify food or find nutrition data. Try another photo.',
-                primary: analysis.primary ? mapFoodItemForResponse(analysis.primary) : null,
-                alternates: analysis.alternates.map(mapFoodItemForResponse),
+                    'Could not identify food in the image. Try another photo.',
+            });
+        }
+        const payload = buildFoodScanApiPayload(analysis);
+        if (!hasTrustedPrimaryNutrition(analysis)) {
+            return res.status(200).json({
+                success: true,
+                saved: false,
+                ...payload,
+                message: analysis.identificationMessage ||
+                    'Food detected but not confident enough to auto-log. Pick an alternate or confirm with search.',
             });
         }
         const saved = await createFoodScan(userId, [analysis.primary]);
         const mapped = mapScanForResponse(saved);
         return res.status(201).json({
+            success: true,
+            saved: true,
             ...mapped,
-            primary: mapFoodItemForResponse(analysis.primary),
-            alternates: analysis.alternates.map(mapFoodItemForResponse),
-            foodItems: [mapFoodItemForResponse(analysis.primary)],
+            ...payload,
         });
     }
     catch (error) {

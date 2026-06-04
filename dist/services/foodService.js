@@ -2,11 +2,9 @@ import axios from 'axios';
 import { assertReasonableImageBase64, postClarifaiJson, stripDataUrlPrefix, } from "./clarifaiClient.js";
 import { getFoodVisionProvider, predictFood, } from "./foodVisionClient.js";
 import { prepareFoodScanBase64 } from "../utils/foodImagePrep.js";
+import { ALTERNATE_MIN_CONFIDENCE, ALTERNATE_NUTRITION_MIN_CONFIDENCE, PRIMARY_MIN_CONFIDENCE, } from "../utils/foodScanConfidence.js";
 const USDA_API_KEY = process.env.USDA_API_KEY || '';
 const FOOD_MODEL_URL = 'https://api.clarifai.com/v2/models/food-item-recognition/versions/1d5fd481e0cf4826aa72ec3ff049e044/outputs';
-/** Food-101 ONNX often tops out ~0.15–0.35 on hard photos; 0.5 caused false "not food" jokes. */
-const HTTP_IS_FOOD_CONFIDENCE = Number(process.env.FOOD_SCAN_IS_FOOD_CONFIDENCE || 0.15);
-const UNCERTAIN_CONFIDENCE = Number(process.env.FOOD_SCAN_UNCERTAIN_CONFIDENCE || 0.12);
 const MAX_ALTERNATES = Number(process.env.FOOD_SCAN_MAX_ALTERNATES || 4);
 export const foodKeywords = [
     'pizza', 'burger', 'sandwich', 'salad', 'pasta', 'sushi', 'cake', 'cookie',
@@ -66,11 +64,6 @@ export function matchesFoodKeywords(name) {
     const normalized = name.toLowerCase().trim();
     return foodKeywords.some((keyword) => normalized.includes(keyword));
 }
-export function isUncertainFoodIdentification(name, confidence, provider) {
-    if (provider !== 'http')
-        return false;
-    return confidence < UNCERTAIN_CONFIDENCE && !matchesFoodKeywords(name);
-}
 export async function getNutritionInfo(foodItem) {
     if (!USDA_API_KEY) {
         return { name: foodItem.name, confidence: foodItem.confidence, nutrients: null };
@@ -92,6 +85,81 @@ export async function getNutritionInfo(foodItem) {
         console.log(`ERROR fetching USDA data for ${foodItem.name}`, err.message);
         return { name: foodItem.name, confidence: foodItem.confidence, nutrients: null };
     }
+}
+/** Manual correction: USDA text search (multiple matches). */
+export async function searchFoodNutrition(query, limit = 8) {
+    const trimmed = query.trim();
+    if (!trimmed)
+        return [];
+    if (!USDA_API_KEY) {
+        return [{ name: trimmed, nutrients: null }];
+    }
+    try {
+        const usdaResponse = await axios.get(`https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${USDA_API_KEY}&query=${encodeURIComponent(trimmed)}&pageSize=${limit}`);
+        const foods = usdaResponse.data?.foods || [];
+        return foods.map((food) => ({
+            name: food.description || trimmed,
+            fdcId: food.fdcId,
+            nutrients: extractNutrients(food),
+        }));
+    }
+    catch (error) {
+        const err = error;
+        console.log(`ERROR searching USDA for ${trimmed}`, err.message);
+        return [];
+    }
+}
+/** Manual correction: single food name → primary-shaped item with USDA. */
+export async function getNutritionForFoodName(foodName, confidence = 1) {
+    return getNutritionInfo({ name: foodName.trim(), confidence });
+}
+function filterAlternateConcepts(concepts, excludeName) {
+    const exclude = excludeName.toLowerCase().trim();
+    return concepts
+        .filter((c) => c.name.toLowerCase().trim() !== exclude)
+        .filter((c) => c.confidence >= ALTERNATE_MIN_CONFIDENCE)
+        .sort((a, b) => b.confidence - a.confidence)
+        .slice(0, MAX_ALTERNATES);
+}
+async function enrichAlternates(concepts) {
+    return Promise.all(concepts.map(async (c) => {
+        if (c.confidence >= ALTERNATE_NUTRITION_MIN_CONFIDENCE) {
+            return getNutritionInfo(conceptToFoodItem(c));
+        }
+        return {
+            name: c.name,
+            confidence: c.confidence,
+            nutrients: null,
+        };
+    }));
+}
+async function buildHttpVisionAnalysis(primaryConcept, allConcepts) {
+    const quality = primaryConcept.confidence >= PRIMARY_MIN_CONFIDENCE ? 'high' : 'low';
+    const alternateConcepts = filterAlternateConcepts(allConcepts, primaryConcept.name);
+    const alternates = await enrichAlternates(alternateConcepts);
+    if (quality === 'high') {
+        const primary = await getNutritionInfo(conceptToFoodItem(primaryConcept));
+        return {
+            identificationQuality: 'high',
+            primary,
+            visionSuggestion: null,
+            alternates,
+            foodItems: [primary],
+            uncertainIdentification: false,
+        };
+    }
+    return {
+        identificationQuality: 'low',
+        primary: null,
+        visionSuggestion: {
+            name: primaryConcept.name,
+            confidence: primaryConcept.confidence,
+        },
+        alternates,
+        foodItems: [],
+        uncertainIdentification: false,
+        identificationMessage: 'Could not identify this food confidently. Choose an alternate below or search by name (e.g. chicken, rice bowl).',
+    };
 }
 async function getClarifaiFoodConcepts(cleanBase64) {
     const response = await postClarifaiJson(FOOD_MODEL_URL, {
@@ -126,24 +194,31 @@ function filterFoodConcepts(concepts, provider) {
 function conceptToFoodItem(concept) {
     return { name: concept.name, confidence: concept.confidence };
 }
-async function buildAnalysisFromPrimaryAndAlternates(primaryConcept, alternateConcepts, provider) {
-    const uncertain = isUncertainFoodIdentification(primaryConcept.name, primaryConcept.confidence, provider);
-    if (uncertain) {
+async function buildClarifaiAnalysis(primaryConcept, alternateConcepts) {
+    const quality = primaryConcept.confidence >= PRIMARY_MIN_CONFIDENCE ? 'high' : 'low';
+    const alternates = await enrichAlternates(filterAlternateConcepts(alternateConcepts, primaryConcept.name));
+    if (quality === 'high') {
+        const primary = await getNutritionInfo(conceptToFoodItem(primaryConcept));
         return {
-            primary: null,
-            alternates: [],
-            foodItems: [],
-            uncertainIdentification: true,
-            identificationMessage: 'Could not identify food confidently — try another angle or better lighting.',
+            identificationQuality: 'high',
+            primary,
+            visionSuggestion: null,
+            alternates,
+            foodItems: [primary],
+            uncertainIdentification: false,
         };
     }
-    const primary = await getNutritionInfo(conceptToFoodItem(primaryConcept));
-    const alternates = await Promise.all(alternateConcepts.slice(0, MAX_ALTERNATES).map((c) => getNutritionInfo(conceptToFoodItem(c))));
     return {
-        primary,
+        identificationQuality: 'low',
+        primary: null,
+        visionSuggestion: {
+            name: primaryConcept.name,
+            confidence: primaryConcept.confidence,
+        },
         alternates,
-        foodItems: [primary],
+        foodItems: [],
         uncertainIdentification: false,
+        identificationMessage: 'Could not identify this food confidently. Search for the correct food name.',
     };
 }
 function pickPrimaryConcept(concepts) {
@@ -171,17 +246,20 @@ export async function analyzeImage(imageBase64) {
             primaryConfidence: primaryConcept.confidence,
             alternateCount: concepts.filter((c) => c.name !== primaryConcept.name).length,
         });
-        const alternateConcepts = concepts
-            .filter((c) => c.name !== primaryConcept.name)
-            .map((c) => ({ name: c.name, confidence: c.confidence }));
-        return buildAnalysisFromPrimaryAndAlternates(primaryConcept, alternateConcepts, provider);
+        const allConcepts = concepts.map((c) => ({
+            name: c.name,
+            confidence: c.confidence,
+        }));
+        return buildHttpVisionAnalysis(primaryConcept, allConcepts);
     }
     const rawConcepts = await getClarifaiFoodConcepts(cleanBase64);
     const filtered = filterFoodConcepts(rawConcepts, provider);
     const primaryConcept = pickPrimaryConcept(filtered);
     if (!primaryConcept) {
         return {
+            identificationQuality: 'none',
             primary: null,
+            visionSuggestion: null,
             alternates: [],
             foodItems: [],
             uncertainIdentification: true,
@@ -190,21 +268,20 @@ export async function analyzeImage(imageBase64) {
     }
     const primary = { name: primaryConcept.name, confidence: primaryConcept.value ?? 0 };
     const alternates = alternateConceptsFromList(filtered, primaryConcept);
-    return buildAnalysisFromPrimaryAndAlternates(primary, alternates, provider);
+    return buildClarifaiAnalysis(primary, alternates);
 }
-/** Whether the scan should be treated as food (HTTP provider uses primary confidence). */
-export function isFoodScanResult(analysis, provider) {
-    if (analysis.uncertainIdentification || !analysis.primary) {
+/** Whether vision detected food in the image (includes low-confidence / manual correction path). */
+export function isFoodScanResult(analysis) {
+    if (analysis.uncertainIdentification)
         return false;
-    }
-    if (provider === 'http') {
-        return analysis.primary.confidence >= HTTP_IS_FOOD_CONFIDENCE;
-    }
-    const name = analysis.primary.name?.toLowerCase().trim() || '';
-    const passesConfidence = analysis.primary.confidence >= 0.25;
-    const hasName = name.length >= 2 && /^[a-zA-Z\s\-]+$/.test(name);
-    const keywordMatch = matchesFoodKeywords(name);
-    return hasName && (keywordMatch || passesConfidence) && analysis.primary.confidence >= 0.3;
+    return (analysis.identificationQuality === 'high' ||
+        analysis.identificationQuality === 'low' ||
+        Boolean(analysis.visionSuggestion));
+}
+/** Whether primary has USDA totals safe to log as the meal total. */
+export function hasTrustedPrimaryNutrition(analysis) {
+    return (analysis.identificationQuality === 'high' &&
+        Boolean(analysis.primary?.nutrients));
 }
 /** UI-friendly aliases (scan service uses protein/carbs/fats). */
 export function nutrientsWithAliases(nutrients) {

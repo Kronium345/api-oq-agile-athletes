@@ -1,5 +1,6 @@
 import { NextFunction, Request, Response } from 'express';
 import { getUserById } from '../models/user.ts';
+import { verifyAuthToken } from '../utils/jwt.ts';
 
 interface AuthenticatedRequest<P = any, ResBody = any, ReqBody = any, ReqQuery = any> extends Request<P, ResBody, ReqBody, ReqQuery> {
   user?: any;
@@ -56,7 +57,9 @@ async function authenticate(req: AuthenticatedRequest<any, any, any, any>, res: 
     }
 
     const token = authHeader.split(' ')[1];
-    const resolvedUserId = resolveUserIdFromToken(token);
+
+    const verified = verifyAuthToken(token);
+    const resolvedUserId = verified?.userId ?? resolveUserIdFromToken(token);
 
     if (!resolvedUserId) {
       console.log('[auth] unable to resolve user id from token', { path: req.path });

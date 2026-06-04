@@ -1,4 +1,5 @@
 import { getUserById } from "../models/user.js";
+import { verifyAuthToken } from "../utils/jwt.js";
 function decodeJwtPayload(token) {
     const parts = token.split('.');
     if (parts.length !== 3) {
@@ -41,7 +42,8 @@ async function authenticate(req, res, next) {
             return;
         }
         const token = authHeader.split(' ')[1];
-        const resolvedUserId = resolveUserIdFromToken(token);
+        const verified = verifyAuthToken(token);
+        const resolvedUserId = verified?.userId ?? resolveUserIdFromToken(token);
         if (!resolvedUserId) {
             console.log('[auth] unable to resolve user id from token', { path: req.path });
             res.status(401).json({

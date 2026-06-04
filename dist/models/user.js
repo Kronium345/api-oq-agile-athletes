@@ -7,16 +7,34 @@ function getUsersCollection() {
     const db = client.db(getMongoDbName());
     return db.collection(USERS_TABLE);
 }
-async function createUser({ name, email, password }) {
+function buildDisplayName(params) {
+    if (params.name?.trim())
+        return params.name.trim();
+    const fromParts = [params.firstName, params.lastName].filter(Boolean).join(' ').trim();
+    if (fromParts)
+        return fromParts;
+    return params.email;
+}
+async function createUser({ name, email, password, firstName, lastName, username, }) {
     const usersCollection = getUsersCollection();
     const userId = uuidv4();
     const hashedPassword = await bcrypt.hash(password, 12);
     const createdAt = new Date().toISOString();
+    const displayName = buildDisplayName({ name, firstName, lastName, email });
     const user = {
         userId,
-        email,
-        name,
+        email: email.toLowerCase().trim(),
+        name: displayName,
+        firstName: firstName?.trim() || null,
+        lastName: lastName?.trim() || null,
+        username: username?.trim() || null,
         password: hashedPassword,
+        authProvider: 'local',
+        gender: null,
+        experience: null,
+        avatar: null,
+        weight: null,
+        unit: 'kg',
         shareStepsEnabled: true,
         createdAt,
         updatedAt: createdAt,
@@ -28,41 +46,54 @@ async function createUser({ name, email, password }) {
 }
 async function getUserByEmail(email) {
     const usersCollection = getUsersCollection();
-    return usersCollection.findOne({ email });
+    return usersCollection.findOne({ email: email.toLowerCase().trim() });
 }
-/**
- * Get user by userId
- */
+async function getUserByUsername(username) {
+    const usersCollection = getUsersCollection();
+    return usersCollection.findOne({ username: username.trim() });
+}
+async function getUserByEmailOrUsername(emailOrUsername) {
+    const trimmed = emailOrUsername.trim();
+    if (trimmed.includes('@')) {
+        return getUserByEmail(trimmed);
+    }
+    return getUserByUsername(trimmed);
+}
 async function getUserById(userId) {
     const usersCollection = getUsersCollection();
     const user = await usersCollection.findOne({ userId });
     if (!user)
         return null;
-    // Remove password from response
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { password: _, ...userWithoutPassword } = user;
     return userWithoutPassword;
 }
-/**
- * Authenticate user (verify password)
- */
 async function authenticateUser(email, password) {
     const user = await getUserByEmail(email);
-    if (!user) {
+    if (!user || !user.password) {
         return { success: false, message: 'Invalid credentials' };
     }
     const isValid = await bcrypt.compare(password, user.password);
     if (!isValid) {
         return { success: false, message: 'Invalid credentials' };
     }
-    // Return user without password
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { password: _, ...userWithoutPassword } = user;
     return { success: true, user: userWithoutPassword };
 }
-/**
- * Update user
- */
+async function authenticateUserByEmailOrUsername(emailOrUsername, password) {
+    const user = await getUserByEmailOrUsername(emailOrUsername);
+    if (!user || !user.password) {
+        return { success: false, message: 'User not found' };
+    }
+    const isValid = await bcrypt.compare(password, user.password);
+    if (!isValid) {
+        return { success: false, message: 'Invalid credentials' };
+    }
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { password: _, ...userWithoutPassword } = user;
+    return { success: true, user: userWithoutPassword };
+}
 async function getUsersByIds(userIds) {
     if (!userIds.length)
         return [];
@@ -104,4 +135,4 @@ async function updateUser(userId, updates) {
     await usersCollection.updateOne({ userId }, { $set: updateDoc });
     return getUserById(userId);
 }
-export { authenticateUser, createUser, getUserByEmail, getUserById, getUsersByIds, listUserSuggestions, listUsersWithStepSharing, updateUser };
+export { authenticateUser, authenticateUserByEmailOrUsername, createUser, getUserByEmail, getUserByUsername, getUserByEmailOrUsername, getUserById, getUsersByIds, listUserSuggestions, listUsersWithStepSharing, updateUser, };

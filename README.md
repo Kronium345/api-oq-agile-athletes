@@ -28,6 +28,18 @@ flowchart LR
 
 Copy `.env.example` to `.env` for local development.
 
+
+Post-signup flow: **register → gender → experience → avatar → weight**. See **`ONBOARDING_API.md`** for the full contract.
+
+| Method | Path |
+|--------|------|
+| POST | `/auth/register`, `/auth/login` |
+| GET | `/user/:id` |
+| PATCH | `/user/:id/gender`, `/experience`, `/weight` |
+| PUT | `/user/:id/avatar` (file or preset URL JSON) |
+
+Legacy routes **`/auth/signup`** and **`/auth/signin`** remain for older clients. Set **`JWT_SECRET`** in production. Google auth is **not** implemented on this API yet.
+
 ### Deploy order
 
 1. Deploy Python service; wait until `GET /ready` returns `200`.
@@ -42,18 +54,24 @@ Copy `.env.example` to `.env` for local development.
 
 ### Meal nutrition totals (important)
 
-Vision returns a **`primaryConcept`** (top-1 label) and optional **`concepts`** alternates (confidence ≥ 0.15). The API response includes:
+Vision returns **`primaryConcept`** (top-1) and **`concepts`** alternates. The API applies confidence gates (see `NODE_INTEGRATION_PROMPT.md`):
 
-- **`primary`** — use this for calories / macros on the summary card
-- **`alternates`** — display only; do **not** sum into total nutrition
-- **`foodItems`** — `[primary]` only (backward compatible; must not be summed across all matches)
+- **`primary`** + **`foodItems`** — only when `identificationQuality === "high"` (confidence ≥ `FOOD_SCAN_PRIMARY_MIN_CONFIDENCE`, default **0.5**)
+- **`visionSuggestion`** — when below 0.5; show as unverified guess, **no meal totals**
+- **`alternates`** — labels ≥ 0.15 only; display / pick for correction; do **not** sum
 
-Misclassified packaged food (e.g. chicken → apple pie) is a Food-101 limitation; totals are still a **single** USDA lookup for the primary label.
+Low-confidence mislabels (e.g. chicken → lasagna at 22%) return `needsManualSelection: true` and empty `foodItems`.
 
 ### Routes
 
-- `POST /analyze-food` — preview + `isFood` + `primary` / `alternates`
-- `POST /foodScan/analyze` — analyze + save **primary only** to Mongo
+- `POST /analyze-food` — preview scan
+- `GET /analyze-food/search?q=` — USDA manual search
+- `POST /analyze-food/correct` — `{ foodName }` → trusted primary (no save)
+- `POST /foodScan/analyze` — analyze; auto-saves only when high confidence
+- `GET /foodScan/search?q=` — USDA search
+- `POST /foodScan/confirm` — `{ userId, foodName }` — save after manual correction
+
+Full mobile contract: **`NODE_INTEGRATION_PROMPT.md`**.
 
 ## AI Trainer chat (`/chat`)
 

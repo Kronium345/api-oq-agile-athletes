@@ -5,39 +5,64 @@ import { getMongoClient, getMongoDbName } from '../config/mongoClient.ts';
 
 const USERS_TABLE = process.env.MONGO_USERS_COLLECTION || 'users';
 
-interface CreateUserParams {
+export interface CreateUserParams {
   name: string;
   email: string;
   password: string;
+  firstName?: string;
+  lastName?: string;
+  username?: string;
 }
 
-interface User {
+export interface User {
   userId: string;
   email: string;
   name: string;
+  firstName?: string | null;
+  lastName?: string | null;
+  username?: string | null;
   password?: string;
+  authProvider?: string;
+  gender?: string | null;
+  experience?: string | null;
+  avatar?: string | null;
+  weight?: number | null;
+  unit?: string;
+  shareStepsEnabled?: boolean;
+  resetCode?: string | null;
+  resetCodeExpires?: string | null;
   createdAt: string;
   updatedAt: string;
-  [key: string]: any; 
+  [key: string]: unknown;
 }
 
-interface UserWithoutPassword {
+export interface UserWithoutPassword {
   userId: string;
   email: string;
   name: string;
+  firstName?: string | null;
+  lastName?: string | null;
+  username?: string | null;
+  authProvider?: string;
+  gender?: string | null;
+  experience?: string | null;
+  avatar?: string | null;
+  weight?: number | null;
+  unit?: string;
+  shareStepsEnabled?: boolean;
   createdAt: string;
   updatedAt: string;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
-interface AuthResult {
+export interface AuthResult {
   success: boolean;
   message?: string;
   user?: UserWithoutPassword;
 }
 
-interface UpdateUserParams {
-  [key: string]: any;
+export interface UpdateUserParams {
+  [key: string]: unknown;
 }
 
 function getUsersCollection(): Collection<User> {
@@ -46,17 +71,46 @@ function getUsersCollection(): Collection<User> {
   return db.collection<User>(USERS_TABLE);
 }
 
-async function createUser({ name, email, password }: CreateUserParams): Promise<UserWithoutPassword> {
+function buildDisplayName(params: {
+  name?: string;
+  firstName?: string;
+  lastName?: string;
+  email: string;
+}): string {
+  if (params.name?.trim()) return params.name.trim();
+  const fromParts = [params.firstName, params.lastName].filter(Boolean).join(' ').trim();
+  if (fromParts) return fromParts;
+  return params.email;
+}
+
+async function createUser({
+  name,
+  email,
+  password,
+  firstName,
+  lastName,
+  username,
+}: CreateUserParams): Promise<UserWithoutPassword> {
   const usersCollection = getUsersCollection();
   const userId = uuidv4();
   const hashedPassword = await bcrypt.hash(password, 12);
   const createdAt = new Date().toISOString();
+  const displayName = buildDisplayName({ name, firstName, lastName, email });
 
   const user: User = {
     userId,
-    email,
-    name,
+    email: email.toLowerCase().trim(),
+    name: displayName,
+    firstName: firstName?.trim() || null,
+    lastName: lastName?.trim() || null,
+    username: username?.trim() || null,
     password: hashedPassword,
+    authProvider: 'local',
+    gender: null,
+    experience: null,
+    avatar: null,
+    weight: null,
+    unit: 'kg',
     shareStepsEnabled: true,
     createdAt,
     updatedAt: createdAt,
@@ -71,49 +125,72 @@ async function createUser({ name, email, password }: CreateUserParams): Promise<
 
 async function getUserByEmail(email: string): Promise<User | null> {
   const usersCollection = getUsersCollection();
-  return usersCollection.findOne({ email });
+  return usersCollection.findOne({ email: email.toLowerCase().trim() });
 }
 
-/**
- * Get user by userId
- */
+async function getUserByUsername(username: string): Promise<User | null> {
+  const usersCollection = getUsersCollection();
+  return usersCollection.findOne({ username: username.trim() });
+}
+
+async function getUserByEmailOrUsername(emailOrUsername: string): Promise<User | null> {
+  const trimmed = emailOrUsername.trim();
+  if (trimmed.includes('@')) {
+    return getUserByEmail(trimmed);
+  }
+  return getUserByUsername(trimmed);
+}
+
 async function getUserById(userId: string): Promise<UserWithoutPassword | null> {
   const usersCollection = getUsersCollection();
   const user = await usersCollection.findOne({ userId });
 
   if (!user) return null;
 
-  // Remove password from response
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { password: _, ...userWithoutPassword } = user;
   return userWithoutPassword;
 }
 
-/**
- * Authenticate user (verify password)
- */
 async function authenticateUser(email: string, password: string): Promise<AuthResult> {
   const user = await getUserByEmail(email);
-  
-  if (!user) {
+
+  if (!user || !user.password) {
     return { success: false, message: 'Invalid credentials' };
   }
 
-  const isValid = await bcrypt.compare(password, user.password!);
-  
+  const isValid = await bcrypt.compare(password, user.password);
+
   if (!isValid) {
     return { success: false, message: 'Invalid credentials' };
   }
 
-  // Return user without password
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { password: _, ...userWithoutPassword } = user;
   return { success: true, user: userWithoutPassword };
 }
 
-/**
- * Update user
- */
+async function authenticateUserByEmailOrUsername(
+  emailOrUsername: string,
+  password: string
+): Promise<AuthResult> {
+  const user = await getUserByEmailOrUsername(emailOrUsername);
+
+  if (!user || !user.password) {
+    return { success: false, message: 'User not found' };
+  }
+
+  const isValid = await bcrypt.compare(password, user.password);
+
+  if (!isValid) {
+    return { success: false, message: 'Invalid credentials' };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { password: _, ...userWithoutPassword } = user;
+  return { success: true, user: userWithoutPassword };
+}
+
 async function getUsersByIds(userIds: string[]): Promise<UserWithoutPassword[]> {
   if (!userIds.length) return [];
   const usersCollection = getUsersCollection();
@@ -151,7 +228,10 @@ async function listUsersWithStepSharing(limit: number): Promise<UserWithoutPassw
   return users as UserWithoutPassword[];
 }
 
-async function updateUser(userId: string, updates: UpdateUserParams): Promise<UserWithoutPassword | null> {
+async function updateUser(
+  userId: string,
+  updates: UpdateUserParams
+): Promise<UserWithoutPassword | null> {
   const usersCollection = getUsersCollection();
   const updateDoc = {
     ...updates,
@@ -164,16 +244,15 @@ async function updateUser(userId: string, updates: UpdateUserParams): Promise<Us
 }
 
 export {
-    authenticateUser,
-    createUser,
-    getUserByEmail,
-    getUserById,
-    getUsersByIds,
-    listUserSuggestions,
-    listUsersWithStepSharing,
-    updateUser, type AuthResult, type CreateUserParams, type UpdateUserParams,
-    // Export types
-    type User,
-    type UserWithoutPassword
+  authenticateUser,
+  authenticateUserByEmailOrUsername,
+  createUser,
+  getUserByEmail,
+  getUserByUsername,
+  getUserByEmailOrUsername,
+  getUserById,
+  getUsersByIds,
+  listUserSuggestions,
+  listUsersWithStepSharing,
+  updateUser,
 };
-

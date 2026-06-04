@@ -4,10 +4,12 @@ import path from 'path';
 import { stripDataUrlPrefix } from '../services/clarifaiClient.ts';
 import {
   analyzeImage,
+  getNutritionForFoodName,
   isFoodScanResult,
   mapFoodItemForResponse,
+  searchFoodNutrition,
 } from '../services/foodService.ts';
-import { getFoodVisionProvider } from '../services/foodVisionClient.ts';
+import { buildFoodScanApiPayload } from '../services/foodScanResponse.ts';
 import {
   foodAnalysisErrorToHttp,
   isFoodAnalysisServiceError,
@@ -21,6 +23,54 @@ const JOKES = [
   "Not sure that's edible! Let's scan something tasty this time.",
   "That's definitely not on the menu! Let's try again.",
 ];
+
+router.get('/search', async (req: Request, res: Response) => {
+  try {
+    const query = typeof req.query.q === 'string' ? req.query.q : req.query.query;
+    if (!query || !String(query).trim()) {
+      return res.status(400).json({ message: 'Query parameter q (or query) is required' });
+    }
+
+    const limit = Math.min(Number(req.query.limit) || 8, 20);
+    const results = await searchFoodNutrition(String(query).trim(), limit);
+
+    return res.status(200).json({
+      query: String(query).trim(),
+      results: results.map((r) => ({
+        name: r.name,
+        fdcId: r.fdcId,
+        nutrients: r.nutrients,
+      })),
+    });
+  } catch (error: unknown) {
+    console.error('Food search error', error);
+    return res.status(500).json({ message: 'Could not search foods. Please try again.' });
+  }
+});
+
+/** Manual correction after a low-confidence scan — returns a trusted primary shape. */
+router.post('/correct', async (req: Request, res: Response) => {
+  try {
+    const { foodName } = req.body as { foodName?: string };
+    if (!foodName || !foodName.trim()) {
+      return res.status(400).json({ message: 'foodName is required' });
+    }
+
+    const primary = await getNutritionForFoodName(foodName.trim());
+    const mapped = mapFoodItemForResponse(primary);
+
+    return res.status(200).json({
+      identificationQuality: 'high',
+      primary: mapped,
+      foodItems: [mapped],
+      needsManualSelection: false,
+      allowManualSearch: true,
+    });
+  } catch (error: unknown) {
+    console.error('Food correct error', error);
+    return res.status(500).json({ message: 'Could not look up nutrition for that food.' });
+  }
+});
 
 router.post('/', async (req: Request, res: Response) => {
   try {
@@ -36,10 +86,9 @@ router.post('/', async (req: Request, res: Response) => {
     const filename = path.join(uploadsDir, `${Date.now()}.jpg`);
     fs.writeFileSync(filename, buffer);
 
-    const provider = getFoodVisionProvider();
     const analysis = await analyzeImage(imageBase64);
 
-    if (!isFoodScanResult(analysis, provider)) {
+    if (!isFoodScanResult(analysis)) {
       const randomJoke = JOKES[Math.floor(Math.random() * JOKES.length)];
       return res.status(200).json({
         isFood: false,
@@ -47,28 +96,17 @@ router.post('/', async (req: Request, res: Response) => {
         foodItems: [],
         primary: null,
         alternates: [],
+        visionSuggestion: null,
+        needsManualSelection: false,
         path: filename,
       });
     }
 
-    const primary = mapFoodItemForResponse(analysis.primary!);
-    const alternates = analysis.alternates.map(mapFoodItemForResponse);
-
-    const lowConfidence = primary.confidence < 0.35;
+    const payload = buildFoodScanApiPayload(analysis);
 
     return res.status(200).json({
-      isFood: true,
-      primary,
-      alternates,
-      /** Only the primary item — do not sum alternates for meal totals. */
-      foodItems: [primary],
+      ...payload,
       path: filename,
-      ...(lowConfidence
-        ? {
-            confidenceWarning:
-              'Identification confidence is low — label may be wrong (e.g. packaged chicken). You can edit the food name after logging.',
-          }
-        : {}),
     });
   } catch (error: unknown) {
     if (isFoodAnalysisServiceError(error)) {

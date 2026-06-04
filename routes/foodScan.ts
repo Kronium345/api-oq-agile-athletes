@@ -12,12 +12,15 @@ import { stripDataUrlPrefix } from '../services/clarifaiClient.ts';
 import {
   analyzeImage,
   foodKeywords,
+  getNutritionForFoodName,
+  hasTrustedPrimaryNutrition,
   isFoodScanResult,
   mapFoodItemForResponse,
   nutrientsWithAliases,
+  searchFoodNutrition,
   type FoodItemWithNutrition,
 } from '../services/foodService.ts';
-import { getFoodVisionProvider } from '../services/foodVisionClient.ts';
+import { buildFoodScanApiPayload } from '../services/foodScanResponse.ts';
 import {
   foodAnalysisErrorToHttp,
   isFoodAnalysisServiceError,
@@ -74,6 +77,62 @@ router.post('/', async (req: Request, res: Response) => {
   }
 });
 
+router.get('/search', async (req: Request, res: Response) => {
+  try {
+    const query = typeof req.query.q === 'string' ? req.query.q : req.query.query;
+    if (!query || !String(query).trim()) {
+      return res.status(400).json({ message: 'Query parameter q (or query) is required' });
+    }
+
+    const limit = Math.min(Number(req.query.limit) || 8, 20);
+    const results = await searchFoodNutrition(String(query).trim(), limit);
+
+    return res.status(200).json({
+      query: String(query).trim(),
+      results: results.map((r) => ({
+        name: r.name,
+        fdcId: r.fdcId,
+        nutrients: r.nutrients,
+      })),
+    });
+  } catch (error: unknown) {
+    const err = error as Error;
+    return res.status(500).json({ message: 'Could not search foods', error: err.message });
+  }
+});
+
+/** Save a manually corrected food after a low-confidence scan. */
+router.post('/confirm', async (req: Request, res: Response) => {
+  const { userId, foodName } = req.body as { userId?: string; foodName?: string };
+
+  if (!userId || !foodName?.trim()) {
+    return res.status(400).json({ message: 'userId and foodName are required' });
+  }
+
+  try {
+    const primary = await getNutritionForFoodName(foodName.trim());
+    if (!primary.nutrients) {
+      return res.status(422).json({
+        success: false,
+        message: 'No nutrition data found for that food name. Try a different search.',
+      });
+    }
+
+    const saved = await createFoodScan(userId, [primary]);
+    const mapped = mapScanForResponse(saved);
+    return res.status(201).json({
+      ...mapped,
+      primary: mapFoodItemForResponse(primary),
+      foodItems: [mapFoodItemForResponse(primary)],
+      identificationQuality: 'high',
+      needsManualSelection: false,
+    });
+  } catch (error: unknown) {
+    const err = error as Error;
+    return res.status(500).json({ message: 'Error saving food scan', error: err.message });
+  }
+});
+
 router.post('/analyze', async (req: Request, res: Response) => {
   const { userId, imagePath } = req.body as { userId?: string; imagePath?: string };
 
@@ -83,27 +142,37 @@ router.post('/analyze', async (req: Request, res: Response) => {
 
   try {
     const imageBase64 = stripDataUrlPrefix(imagePath);
-    const provider = getFoodVisionProvider();
     const analysis = await analyzeImage(imageBase64);
 
-    if (!isFoodScanResult(analysis, provider) || !analysis.primary?.nutrients) {
+    if (!isFoodScanResult(analysis)) {
       return res.status(422).json({
         success: false,
         message:
           analysis.identificationMessage ||
-          'Could not identify food or find nutrition data. Try another photo.',
-        primary: analysis.primary ? mapFoodItemForResponse(analysis.primary) : null,
-        alternates: analysis.alternates.map(mapFoodItemForResponse),
+          'Could not identify food in the image. Try another photo.',
       });
     }
 
-    const saved = await createFoodScan(userId, [analysis.primary]);
+    const payload = buildFoodScanApiPayload(analysis);
+
+    if (!hasTrustedPrimaryNutrition(analysis)) {
+      return res.status(200).json({
+        success: true,
+        saved: false,
+        ...payload,
+        message:
+          analysis.identificationMessage ||
+          'Food detected but not confident enough to auto-log. Pick an alternate or confirm with search.',
+      });
+    }
+
+    const saved = await createFoodScan(userId, [analysis.primary!]);
     const mapped = mapScanForResponse(saved);
     return res.status(201).json({
+      success: true,
+      saved: true,
       ...mapped,
-      primary: mapFoodItemForResponse(analysis.primary),
-      alternates: analysis.alternates.map(mapFoodItemForResponse),
-      foodItems: [mapFoodItemForResponse(analysis.primary)],
+      ...payload,
     });
   } catch (error: unknown) {
     if (isFoodAnalysisServiceError(error)) {
