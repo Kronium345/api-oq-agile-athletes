@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { v4 as uuidv4 } from 'uuid';
 import { getMongoClient, getMongoDbName } from "../config/mongoClient.js";
+import { DEFAULT_EMAIL_NOTIFICATIONS, } from "../utils/emailNotifications.js";
 const USERS_TABLE = process.env.MONGO_USERS_COLLECTION || 'users';
 function getUsersCollection() {
     const client = getMongoClient();
@@ -36,6 +37,10 @@ async function createUser({ name, email, password, firstName, lastName, username
         weight: null,
         unit: 'kg',
         shareStepsEnabled: true,
+        dailyStepGoal: Number(process.env.DEFAULT_DAILY_STEP_GOAL) || 10000,
+        emailSubscription: true,
+        emailNotifications: { ...DEFAULT_EMAIL_NOTIFICATIONS },
+        lastMotivationEmail: null,
         createdAt,
         updatedAt: createdAt,
     };

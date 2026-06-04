@@ -8,6 +8,8 @@ import {
 } from './services/foodVisionClient.ts';
 import { ensureQuizDataSeeded, getQuizBootstrapStatus } from './services/quizBootstrap.ts';
 import { buildDeleteAccountPlayStoreHtml } from './deleteAccountPage.ts';
+import { verifyEmailTransport } from './config/nodemailer.ts';
+import { logQstashStartup } from './utils/upstashEnv.ts';
 
 import analyzeFoodRoutes from './routes/analyzeFood.ts';
 import aiChatRoutes from './routes/aiChat.ts';
@@ -24,6 +26,7 @@ import historyRoutes from './routes/history.ts';
 import stepsRoutes from './routes/steps.ts';
 import userRoutes from './routes/user.ts';
 import userStatsRoutes from './routes/userStats.ts';
+import workflowRoutes from './routes/workflow.ts';
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -59,6 +62,7 @@ app.use('/history', historyRoutes);
 app.use('/favorites', favoritesRoutes); 
 app.use('/user', userRoutes);
 app.use('/user-stats', userStatsRoutes);
+app.use('/workflow', workflowRoutes);
 app.use('/activity', activityRoutes);
 app.use('/uploads', express.static('uploads')); 
 
@@ -81,6 +85,8 @@ app.use((req, res) => {
 async function startServer() {
   try {
     await connectToMongo();
+    verifyEmailTransport();
+    logQstashStartup();
     await ensureQuizDataSeeded();
     const quizStatus = await getQuizBootstrapStatus();
     console.log('[quiz] Mind Center ready:', {

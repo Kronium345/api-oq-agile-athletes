@@ -1,13 +1,17 @@
 import express, { Request, Response } from 'express';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.ts';
 import { deleteAccountByUserId } from '../models/accountDeletion.ts';
+import bcrypt from 'bcryptjs';
 import {
   authenticateUser,
   authenticateUserByEmailOrUsername,
   createUser,
   getUserByEmail,
   getUserByUsername,
+  updateUser,
 } from '../models/user.ts';
+import { isEmailConfigured } from '../config/nodemailer.ts';
+import { sendPasswordResetEmail } from '../utils/send-email.ts';
 import { signAuthToken } from '../utils/jwt.ts';
 import { toClientUser } from '../utils/userResponse.ts';
 
@@ -220,6 +224,81 @@ router.get('/current-user', authenticate, async (req: AuthenticatedRequest, res:
       message: 'Failed to get user',
       error: err.message,
     });
+  }
+});
+
+router.post('/forgotpassword', async (req: Request, res: Response) => {
+  const { email } = req.body as { email?: string };
+
+  if (!email?.trim()) {
+    return res.status(400).json({ message: 'Email is required' });
+  }
+
+  if (!isEmailConfigured()) {
+    return res.status(500).json({ message: 'Email service not configured' });
+  }
+
+  try {
+    const user = await getUserByEmail(email.trim());
+    if (!user) {
+      return res.status(404).json({ message: 'No account found with this email' });
+    }
+
+    const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const resetCodeExpires = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+
+    await updateUser(user.userId, { resetCode, resetCodeExpires });
+
+    await sendPasswordResetEmail(user.email, resetCode);
+
+    const exposeCode =
+      process.env.NODE_ENV !== 'production' || process.env.EMAIL_EXPOSE_RESET_CODE === 'true';
+
+    return res.status(200).json({
+      message: 'Reset code has been sent to your email',
+      ...(exposeCode ? { resetCode } : {}),
+    });
+  } catch (error: unknown) {
+    const err = error as Error;
+    console.error('Forgot password error:', err);
+    return res.status(500).json({ message: 'Failed to send reset code email' });
+  }
+});
+
+router.post('/resetpassword', async (req: Request, res: Response) => {
+  const { email, resetCode, newPassword } = req.body as {
+    email?: string;
+    resetCode?: string;
+    newPassword?: string;
+  };
+
+  if (!email?.trim() || !resetCode?.trim() || !newPassword) {
+    return res.status(400).json({ message: 'email, resetCode, and newPassword are required' });
+  }
+
+  try {
+    const user = await getUserByEmail(email.trim());
+    if (
+      !user ||
+      user.resetCode !== resetCode.trim() ||
+      !user.resetCodeExpires ||
+      new Date(user.resetCodeExpires).getTime() < Date.now()
+    ) {
+      return res.status(400).json({ message: 'Invalid or expired reset code' });
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 12);
+    await updateUser(user.userId, {
+      password: hashedPassword,
+      resetCode: null,
+      resetCodeExpires: null,
+    });
+
+    return res.status(200).json({ message: 'Password updated successfully' });
+  } catch (error: unknown) {
+    const err = error as Error;
+    console.error('Reset password error:', err);
+    return res.status(500).json({ message: 'Error resetting password' });
   }
 });
 

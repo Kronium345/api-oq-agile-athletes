@@ -63,6 +63,10 @@ async function getStepHistoryForUsers(userIds, startDate, endDate) {
     })
         .toArray();
 }
+async function markGoalAchieved(userId, date) {
+    const collection = getStepHistoryCollection();
+    await collection.updateOne({ userId, date }, { $set: { goalAchieved: true, updatedAt: new Date().toISOString() } });
+}
 async function updateSteps(userId, date, stepCount) {
     const collection = getStepHistoryCollection();
     await collection.updateOne({ userId, date }, {
@@ -71,4 +75,4 @@ async function updateSteps(userId, date, stepCount) {
     }, { upsert: true });
     return getStepsByDate(userId, date);
 }
-export { getStepHistory, getStepHistoryForUsers, getStepsByDate, getTotalSteps, recordSteps, updateSteps };
+export { getStepHistory, getStepHistoryForUsers, getStepsByDate, getTotalSteps, markGoalAchieved, recordSteps, updateSteps, };

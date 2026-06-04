@@ -2,6 +2,10 @@ import bcrypt from 'bcryptjs';
 import { Collection } from 'mongodb';
 import { v4 as uuidv4 } from 'uuid';
 import { getMongoClient, getMongoDbName } from '../config/mongoClient.ts';
+import {
+  DEFAULT_EMAIL_NOTIFICATIONS,
+  type EmailNotificationPrefs,
+} from '../utils/emailNotifications.ts';
 
 const USERS_TABLE = process.env.MONGO_USERS_COLLECTION || 'users';
 
@@ -29,6 +33,10 @@ export interface User {
   weight?: number | null;
   unit?: string;
   shareStepsEnabled?: boolean;
+  dailyStepGoal?: number;
+  emailSubscription?: boolean;
+  emailNotifications?: EmailNotificationPrefs;
+  lastMotivationEmail?: string | null;
   resetCode?: string | null;
   resetCodeExpires?: string | null;
   createdAt: string;
@@ -50,6 +58,10 @@ export interface UserWithoutPassword {
   weight?: number | null;
   unit?: string;
   shareStepsEnabled?: boolean;
+  dailyStepGoal?: number;
+  emailSubscription?: boolean;
+  emailNotifications?: EmailNotificationPrefs;
+  lastMotivationEmail?: string | null;
   createdAt: string;
   updatedAt: string;
   [key: string]: unknown;
@@ -112,6 +124,10 @@ async function createUser({
     weight: null,
     unit: 'kg',
     shareStepsEnabled: true,
+    dailyStepGoal: Number(process.env.DEFAULT_DAILY_STEP_GOAL) || 10000,
+    emailSubscription: true,
+    emailNotifications: { ...DEFAULT_EMAIL_NOTIFICATIONS },
+    lastMotivationEmail: null,
     createdAt,
     updatedAt: createdAt,
   };

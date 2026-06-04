@@ -12,3 +12,5 @@ services:
       # Set in Render dashboard (sync FOOD_VISION_API_KEY with Python service):
       # FOOD_VISION_*, USDA_API_KEY, COHERE_API_KEY, COHERE_MODEL
       # MONGODB_URI, JWT_SECRET, FitnessOnePAT (exercise)
+      # Email: EMAIL_USER, EMAIL_APP_PASSWORD, EMAIL_FROM, FRONTEND_URL (EAS Hosting URL)
+      # QStash: QSTASH_URL, QSTASH_TOKEN, QSTASH_CURRENT_SIGNING_KEY, QSTASH_NEXT_SIGNING_KEY

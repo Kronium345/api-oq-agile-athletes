@@ -6,6 +6,7 @@ import { authenticate } from "../middleware/auth.js";
 import { getUserById, updateUser } from "../models/user.js";
 import { addFriendship, getFriendsList, getSuggestions, removeFriendship, updateStepSharing, } from "../services/stepsSocial.js";
 import { routeParam } from "../utils/routeParams.js";
+import { prefsFromMobileSettings } from "../utils/emailNotifications.js";
 import { isValidExperience, isValidGender, toClientUser } from "../utils/userResponse.js";
 const router = express.Router();
 const storage = multer.diskStorage({
@@ -168,6 +169,24 @@ router.patch('/:id/experience', authenticate, async (req, res) => {
         const err = error;
         console.error('Update experience error:', err);
         return res.status(500).json({ message: 'Something went wrong' });
+    }
+});
+router.patch('/:id/notifications', authenticate, async (req, res) => {
+    const id = routeParam(req.params.id);
+    if (!assertSelfOr403(req, id, res))
+        return;
+    try {
+        const synced = prefsFromMobileSettings(req.body);
+        const updatedUser = await updateUser(id, synced);
+        if (!updatedUser) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+        return res.status(200).json(toClientUser(updatedUser));
+    }
+    catch (error) {
+        const err = error;
+        console.error('Update notifications error:', err);
+        return res.status(500).json({ message: 'Failed to update notification preferences' });
     }
 });
 router.patch('/:id/weight', authenticate, async (req, res) => {

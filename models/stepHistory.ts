@@ -3,10 +3,11 @@ import { getMongoClient, getMongoDbName } from '../config/mongoClient.ts';
 
 const STEP_HISTORY_TABLE = process.env.MONGO_STEP_HISTORY_COLLECTION || 'step_history';
 
-interface StepHistoryItem {
+export interface StepHistoryItem {
   userId: string;
   date: string;
   stepCount: number;
+  goalAchieved?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -90,6 +91,14 @@ async function getStepHistoryForUsers(
     .toArray();
 }
 
+async function markGoalAchieved(userId: string, date: string): Promise<void> {
+  const collection = getStepHistoryCollection();
+  await collection.updateOne(
+    { userId, date },
+    { $set: { goalAchieved: true, updatedAt: new Date().toISOString() } }
+  );
+}
+
 async function updateSteps(userId: string, date: string, stepCount: number | string): Promise<StepHistoryItem | null> {
   const collection = getStepHistoryCollection();
   await collection.updateOne(
@@ -109,9 +118,8 @@ export {
     getStepHistoryForUsers,
     getStepsByDate,
     getTotalSteps,
+    markGoalAchieved,
     recordSteps,
     updateSteps,
-    // Export types
-    type StepHistoryItem
 };
 

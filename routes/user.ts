@@ -12,6 +12,7 @@ import {
   updateStepSharing,
 } from '../services/stepsSocial.ts';
 import { routeParam } from '../utils/routeParams.ts';
+import { prefsFromMobileSettings } from '../utils/emailNotifications.ts';
 import { isValidExperience, isValidGender, toClientUser } from '../utils/userResponse.ts';
 
 const router = express.Router();
@@ -199,6 +200,24 @@ router.patch('/:id/experience', authenticate, async (req: AuthenticatedRequest<I
     const err = error as Error;
     console.error('Update experience error:', err);
     return res.status(500).json({ message: 'Something went wrong' });
+  }
+});
+
+router.patch('/:id/notifications', authenticate, async (req: AuthenticatedRequest<IdParams>, res: Response) => {
+  const id = routeParam(req.params.id);
+  if (!assertSelfOr403(req, id, res)) return;
+
+  try {
+    const synced = prefsFromMobileSettings(req.body as Record<string, boolean | undefined>);
+    const updatedUser = await updateUser(id, synced);
+    if (!updatedUser) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    return res.status(200).json(toClientUser(updatedUser));
+  } catch (error: unknown) {
+    const err = error as Error;
+    console.error('Update notifications error:', err);
+    return res.status(500).json({ message: 'Failed to update notification preferences' });
   }
 });
 

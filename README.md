@@ -40,6 +40,18 @@ Post-signup flow: **register → gender → experience → avatar → weight**. 
 
 Legacy routes **`/auth/signup`** and **`/auth/signin`** remain for older clients. Set **`JWT_SECRET`** in production. Google auth is **not** implemented on this API yet.
 
+## Workflow email (Upstash + Nodemailer)
+
+Scheduled fitness emails and password reset share one Gmail transporter. See **`WORKFLOW_EMAIL_API.md`**.
+
+Expo web for email links: copy **`EAS_HOSTING_FRONTEND_PROMPT.md`** into your mobile repo, deploy with EAS Hosting, then set Render `FRONTEND_URL` to that HTTPS URL.
+
+| Method | Path |
+|--------|------|
+| POST | `/workflow/daily-step-reminders`, `/weekly-progress-summary`, `/leaderboard-alerts`, `/motivation-and-goals` |
+| POST | `/auth/forgotpassword`, `/auth/resetpassword` |
+| PATCH | `/user/:id/notifications` — sync email prefs from the app |
+
 ### Deploy order
 
 1. Deploy Python service; wait until `GET /ready` returns `200`.
