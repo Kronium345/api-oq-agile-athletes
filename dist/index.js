@@ -6,6 +6,7 @@ import { checkFoodVisionReady, getFoodVisionProvider, } from "./services/foodVis
 import { ensureQuizDataSeeded, getQuizBootstrapStatus } from "./services/quizBootstrap.js";
 import { buildDeleteAccountPlayStoreHtml } from "./deleteAccountPage.js";
 import { verifyEmailTransport } from "./config/nodemailer.js";
+import { welcomeEmailLogoUrl } from "./utils/send-email.js";
 import { logQstashStartup } from "./utils/upstashEnv.js";
 import analyzeFoodRoutes from "./routes/analyzeFood.js";
 import aiChatRoutes from "./routes/aiChat.js";
@@ -73,6 +74,13 @@ async function startServer() {
     try {
         await connectToMongo();
         verifyEmailTransport();
+        const welcomeLogo = welcomeEmailLogoUrl();
+        if (welcomeLogo) {
+            console.log('[email] welcome logo enabled');
+        }
+        else if (process.env.WELCOME_EMAIL_LOGO_URL?.trim()) {
+            console.warn('[email] WELCOME_EMAIL_LOGO_URL set but invalid — welcome email will omit banner');
+        }
         logQstashStartup();
         await ensureQuizDataSeeded();
         const quizStatus = await getQuizBootstrapStatus();

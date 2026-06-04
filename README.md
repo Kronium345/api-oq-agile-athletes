@@ -42,7 +42,7 @@ Legacy routes **`/auth/signup`** and **`/auth/signin`** remain for older clients
 
 ## Workflow email (Upstash + Nodemailer)
 
-**`POST /auth/register`** and **`POST /auth/signup`** send a one-time welcome email (non-blocking) when `EMAIL_USER` and `EMAIL_APP_PASSWORD` are set.
+**`POST /auth/register`** and **`POST /auth/signup`** send a one-time welcome email (non-blocking) when `EMAIL_USER` and `EMAIL_APP_PASSWORD` are set. Optional banner: **`WELCOME_EMAIL_LOGO_URL`** (HTTPS image on the same host as `FRONTEND_URL`).
 
 Scheduled fitness emails and password reset share the same Gmail transporter. See **`WORKFLOW_EMAIL_API.md`**.
 

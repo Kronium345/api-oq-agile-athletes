@@ -137,14 +137,49 @@ const WELCOME_COLORS = {
   muted: '#555555',
 };
 
+/** Public HTTPS banner for welcome email (hosted on FRONTEND_URL origin). */
+export function welcomeEmailLogoUrl(): string | null {
+  const raw = process.env.WELCOME_EMAIL_LOGO_URL?.trim();
+  if (!raw) return null;
+
+  let url = raw;
+  if (!/^https?:\/\//i.test(url)) {
+    url = `https://${url}`;
+  }
+  if (!/^https:\/\//i.test(url) || /["\s<>]/.test(url)) {
+    console.warn('[email] WELCOME_EMAIL_LOGO_URL ignored — must be a valid https URL');
+    return null;
+  }
+  return url;
+}
+
+function escapeHtmlAttr(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+}
+
+function buildWelcomeLogoRow(logoUrl: string, pageBg: string, alt: string): string {
+  const src = escapeHtmlAttr(logoUrl);
+  const safeAlt = escapeHtmlAttr(alt);
+  return `
+        <tr>
+          <td style="padding: 0; text-align: center; background: ${pageBg};">
+            <img src="${src}" alt="${safeAlt}" width="600"
+                 style="display: block; width: 100%; max-width: 600px; height: auto; border: 0;" />
+          </td>
+        </tr>`;
+}
+
 function buildWelcomeEmailHtml(userName: string, appLink: string): string {
   const appName = welcomeAppDisplayName();
   const safeName = userName.replace(/[<>&]/g, '');
   const c = WELCOME_COLORS;
+  const logoUrl = welcomeEmailLogoUrl();
+  const logoRow = logoUrl ? buildWelcomeLogoRow(logoUrl, c.pageBg, appName) : '';
 
   return `
     <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.55; color: ${c.text}; max-width: 600px; margin: 0 auto; background-color: ${c.pageBg};">
       <table cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color: #ffffff; border-radius: 15px; overflow: hidden; box-shadow: 0 6px 12px rgba(230, 81, 0, 0.12);">
+        ${logoRow}
         <tr>
           <td style="background: linear-gradient(135deg, ${c.primary} 0%, ${c.primaryDark} 100%); text-align: center; padding: 28px;">
             <h1 style="color: white; font-size: 28px; margin: 0;">Welcome to ${appName}</h1>
