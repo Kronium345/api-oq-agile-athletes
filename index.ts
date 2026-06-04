@@ -116,9 +116,21 @@ async function startServer() {
       console.log('[food-vision] provider=clarifai');
     }
 
-    app.listen(PORT, () => {
+    const server = app.listen(PORT, () => {
       console.log(`Server is running on port ${PORT}`);
       console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+    });
+
+    server.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EADDRINUSE') {
+        console.error(
+          `[server] Port ${PORT} is already in use. Another Node process is still running.`,
+          `Find it: netstat -ano | findstr :${PORT}  then: taskkill /PID <pid> /F`
+        );
+      } else {
+        console.error('[server] listen failed:', err.message);
+      }
+      process.exit(1);
     });
   } catch (error: any) {
     console.error('Failed to start server:', error.message);
