@@ -127,37 +127,65 @@ export const sendGoalAchievementEmail = (to: string, data: FitnessEmailData) =>
 export const sendStreakMilestoneEmail = (to: string, data: FitnessEmailData) =>
   sendFitnessReminderEmail({ to, type: 'Streak milestone', fitnessData: data });
 
+/** Orange palette for welcome email (inline styles for client compatibility). */
+const WELCOME_COLORS = {
+  primary: '#FF6F00',
+  primaryDark: '#E65100',
+  accentBg: '#FFF3E0',
+  pageBg: '#FFF8F0',
+  text: '#333333',
+  muted: '#555555',
+};
+
 function buildWelcomeEmailHtml(userName: string, appLink: string): string {
   const appName = welcomeAppDisplayName();
   const safeName = userName.replace(/[<>&]/g, '');
+  const c = WELCOME_COLORS;
+
   return `
-    <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; background-color: #f0f8f0;">
-      <table cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color: #ffffff; border-radius: 15px; overflow: hidden; box-shadow: 0 6px 12px rgba(0,0,0,0.08);">
+    <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.55; color: ${c.text}; max-width: 600px; margin: 0 auto; background-color: ${c.pageBg};">
+      <table cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color: #ffffff; border-radius: 15px; overflow: hidden; box-shadow: 0 6px 12px rgba(230, 81, 0, 0.12);">
         <tr>
-          <td style="background: linear-gradient(135deg, #4CAF50 0%, #2E7D32 100%); text-align: center; padding: 28px;">
+          <td style="background: linear-gradient(135deg, ${c.primary} 0%, ${c.primaryDark} 100%); text-align: center; padding: 28px;">
             <h1 style="color: white; font-size: 28px; margin: 0;">Welcome to ${appName}</h1>
-            <p style="color: rgba(255,255,255,0.9); font-size: 15px; margin: 10px 0 0;">Your fitness journey starts here</p>
+            <p style="color: rgba(255,255,255,0.92); font-size: 15px; margin: 10px 0 0;">Your fitness journey starts here</p>
           </td>
         </tr>
         <tr>
-          <td style="padding: 32px 28px;">
-            <p style="font-size: 17px; margin: 0 0 16px;">Hi <strong style="color: #2E7D32;">${safeName}</strong>,</p>
-            <p style="margin: 0 0 16px;">Thanks for joining us — we're glad you're here. Finish setting up your profile in the app, then explore what ${appName} can do for you:</p>
-            <ul style="margin: 0 0 20px; padding-left: 20px; color: #444;">
-              <li><strong>Steps &amp; goals</strong> — track daily movement, streaks, and progress</li>
-              <li><strong>Leaderboards</strong> — stay motivated with friends</li>
-              <li><strong>Food scan</strong> — log meals and nutrition from photos</li>
-              <li><strong>Workouts &amp; Mind Center</strong> — training and mental wellness in one place</li>
+          <td style="padding: 32px 28px 20px;">
+            <p style="font-size: 17px; margin: 0 0 14px;">Hi <strong style="color: ${c.primaryDark};">${safeName}</strong>,</p>
+            <p style="margin: 0 0 20px; color: ${c.muted};">Thanks for joining — finish onboarding in the app, then explore what's included for free and what Premium unlocks.</p>
+
+            <h2 style="font-size: 16px; color: ${c.primaryDark}; margin: 0 0 10px; border-bottom: 2px solid ${c.accentBg}; padding-bottom: 6px;">Included free</h2>
+            <ul style="margin: 0 0 22px; padding-left: 20px; color: ${c.text}; font-size: 15px;">
+              <li>Sign up, sign in, and onboarding</li>
+              <li><strong>Steps &amp; leaderboard</strong> — daily goals and friendly competition</li>
+              <li>Browse exercises and run <strong>guided workouts</strong></li>
+              <li>Profile, calendar activity, and core home navigation</li>
             </ul>
-            <p style="margin: 0 0 24px; font-size: 15px; color: #555;">We'll send occasional reminders and summaries if you keep notifications on — you can change that anytime in settings.</p>
+
+            <div style="background: ${c.accentBg}; border-radius: 12px; padding: 18px 20px; border-left: 4px solid ${c.primary}; margin-bottom: 22px;">
+              <h2 style="font-size: 16px; color: ${c.primaryDark}; margin: 0 0 8px;">Premium</h2>
+              <p style="margin: 0 0 12px; font-size: 14px; color: ${c.muted};">Subscribe anytime from the in-app subscription screen (RevenueCat) to unlock:</p>
+              <ul style="margin: 0; padding-left: 20px; font-size: 14px; color: ${c.text};">
+                <li><strong>Exercise favorites</strong> — save exercises and use the Favorites tab</li>
+                <li><strong>Workout history</strong> — view past logged workouts</li>
+                <li><strong>Mind Center</strong> — UK-focused mental wellness (articles, resources, assistant)</li>
+                <li><strong>AI Coach</strong> — fitness chatbot with saved conversations</li>
+                <li><strong>Assessment</strong> — anger/anxiety quiz and personalized results</li>
+                <li><strong>Food Tracker</strong> — logging, scanning, and insights <em>(coming soon)</em></li>
+              </ul>
+            </div>
+
+            <p style="margin: 0 0 24px; font-size: 14px; color: ${c.muted};">We'll send occasional step reminders and summaries if you keep email notifications on — change that anytime in settings.</p>
             <p style="text-align: center; margin: 0;">
-              <a href="${appLink}" style="background: linear-gradient(135deg, #4CAF50 0%, #2E7D32 100%); color: white; text-decoration: none; padding: 14px 28px; border-radius: 25px; font-weight: 600; display: inline-block;">Open the app</a>
+              <a href="${appLink}" style="background: linear-gradient(135deg, ${c.primary} 0%, ${c.primaryDark} 100%); color: white; text-decoration: none; padding: 14px 28px; border-radius: 25px; font-weight: 600; display: inline-block;">Open the app</a>
             </p>
           </td>
         </tr>
         <tr>
           <td style="padding: 0 28px 28px; font-size: 14px; color: #666;">
-            <p style="margin: 0;">Stay strong,<br><strong style="color: #2E7D32;">The ${appName} team</strong></p>
+            <p style="margin: 0;">Stay strong,<br><strong style="color: ${c.primaryDark};">The ${appName} team</strong></p>
           </td>
         </tr>
       </table>
