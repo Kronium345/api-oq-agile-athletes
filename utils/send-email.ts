@@ -2,8 +2,15 @@ import dayjs from 'dayjs';
 import transporter, { accountEmail, isEmailConfigured } from '../config/nodemailer.ts';
 import { emailTemplates, type EmailTemplateLabel } from './email-template.ts';
 
-const frontendBase = () =>
-  (process.env.FRONTEND_URL || 'https://api-oq-agile-athletes.onrender.com').replace(/\/$/, '');
+function frontendBase(): string {
+  let url = (process.env.FRONTEND_URL || 'https://api-oq-agile-athletes.onrender.com')
+    .trim()
+    .replace(/\/$/, '');
+  if (url && !/^https?:\/\//i.test(url)) {
+    url = `https://${url}`;
+  }
+  return url;
+}
 
 export interface FitnessEmailData {
   user?: { name?: string; email?: string };
