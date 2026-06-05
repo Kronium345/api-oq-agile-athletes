@@ -40,6 +40,23 @@ Post-signup flow: **register → gender → experience → avatar → weight**. 
 
 Legacy routes **`/auth/signup`** and **`/auth/signin`** remain for older clients. Set **`JWT_SECRET`** in production. Google auth is **not** implemented on this API yet.
 
+## AI Coach & Mind Center (`/chat`)
+
+`POST /chat/generate` — body `{ prompt, mode?, chatHistory? }`, optional header `X-Chat-Mode: coach | mind`.
+
+| Mode | Behavior |
+|------|----------|
+| **`coach`** | Requires `Authorization: Bearer <JWT>`. Loads profile + stats from Mongo (user, user-stats, steps total, activity days this month) and prepends a plain-text context block before the client prompt. Premium is enforced in the mobile app (RevenueCat), not on this route yet. |
+| **`mind`** (default) | Uses `prompt` as sent — no fitness profile injection (Mind Center). |
+
+Legacy clients: omit `mode` → **mind**. Temporary coach inference: Bearer token + prompt contains the app’s plain-text format instructions (`Format your reply in plain text only…`).
+
+Response unchanged: `{ "generations": [{ "text": "..." }] }`. Errors: `{ "error", "details" }`.
+
+`GET /chat/coach-context` — authenticated debug JSON of the same context block (no LLM call).
+
+Server never trusts profile fields in the request body for personalization.
+
 ## Workflow email (Upstash + Nodemailer)
 
 **`POST /auth/register`** and **`POST /auth/signup`** send a one-time welcome email (non-blocking) when `EMAIL_USER` and `EMAIL_APP_PASSWORD` are set. Optional banner: **`WELCOME_EMAIL_LOGO_URL`** (HTTPS image on the same host as `FRONTEND_URL`).

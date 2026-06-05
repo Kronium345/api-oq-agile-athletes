@@ -1,5 +1,6 @@
 import express, { Request, Response } from 'express';
 import { ObjectId } from 'mongodb';
+import { authenticate, tryResolveAuthenticatedUser, type AuthenticatedRequest } from '../middleware/auth.ts';
 import {
   deleteChatById,
   getChatById,
@@ -13,7 +14,12 @@ import {
   generateCohereReply,
   toGenerationsResponse,
 } from '../services/cohereChat.ts';
+import {
+  buildCoachAugmentedPrompt,
+  buildUserCoachContext,
+} from '../utils/coach-context.ts';
 import { chatGenerateRateLimiter } from '../utils/chatRateLimit.ts';
+import { resolveChatMode } from '../utils/chatMode.ts';
 import { routeParam } from '../utils/routeParams.ts';
 
 const router = express.Router();
@@ -49,10 +55,15 @@ router.get('/status', async (_req: Request, res: Response) => {
     rateLimitPerMinute: Number(process.env.CHAT_RATE_LIMIT_PER_MINUTE || 15),
     endpoints: {
       generate: 'POST /chat/generate',
+      coachContext: 'GET /chat/coach-context',
       save: 'POST /chat/save-chat',
       list: 'GET /chat/get-chat/:userId',
       byId: 'GET /chat/get-chat-by-id/:chatId',
       delete: 'DELETE /chat/delete-chat/:chatId',
+    },
+    generateModes: {
+      coach: 'JWT required; server injects profile stats (mode: "coach" or X-Chat-Mode: coach)',
+      mind: 'No fitness profile injection (mode: "mind" or default)',
     },
     hint: cohereConfigured
       ? undefined
@@ -157,32 +168,74 @@ router.delete('/delete-chat/:chatId', async (req: Request, res: Response) => {
   }
 });
 
+/** Debug: profile context used for AI Coach (authenticated). */
+router.get('/coach-context', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const ctx = await buildUserCoachContext(req.userId!);
+    return res.json({ success: true, context: ctx });
+  } catch (error: unknown) {
+    const err = error as Error;
+    console.error('[chat] coach-context error:', err.message);
+    return res.status(500).json({
+      error: 'Failed to load coach context',
+      details: err.message,
+    });
+  }
+});
+
 /**
- * Cohere fitness trainer reply.
- * Body: { prompt: string, chatHistory?: ChatMessage[] }
- * Response (legacy): { generations: [{ text }] }
+ * Cohere chat reply (AI Coach + Mind Center).
+ * Body: { prompt: string, mode?: "coach" | "mind", chatHistory?: ChatMessage[] }
+ * Header: X-Chat-Mode: coach | mind
+ * Response: { generations: [{ text }] }
  */
 router.post('/generate', chatGenerateRateLimiter, async (req: Request, res: Response) => {
   const { prompt, chatHistory, messages } = req.body as {
     prompt?: string;
+    mode?: string;
     chatHistory?: ChatMessage[];
     messages?: ChatMessage[];
   };
 
   const history = chatHistory ?? messages ?? [];
+  const promptText = typeof prompt === 'string' ? prompt : '';
+  const mode = resolveChatMode(req, promptText);
 
   try {
+    let effectivePrompt = promptText;
+
+    if (mode === 'coach') {
+      const auth = await tryResolveAuthenticatedUser(req as AuthenticatedRequest);
+      if (!auth) {
+        return res.status(401).json({
+          error: 'Authentication required',
+          details: 'Bearer token required for AI Coach mode',
+        });
+      }
+
+      const ctx = await buildUserCoachContext(auth.userId);
+      effectivePrompt = buildCoachAugmentedPrompt(promptText, ctx);
+    }
+
     const { text, model } = await generateCohereReply({
-      prompt: prompt || '',
+      prompt: effectivePrompt,
       chatHistory: history,
     });
 
-    console.log('[chat] generate ok', { model, promptLength: prompt?.length ?? 0 });
+    const logPayload: Record<string, unknown> = {
+      model,
+      mode,
+      promptLength: promptText.length,
+    };
+    if (mode === 'coach') {
+      logPayload.userId = (req as AuthenticatedRequest).userId;
+    }
+    console.log('[chat] generate ok', logPayload);
 
     return res.json(toGenerationsResponse(text));
   } catch (error: unknown) {
     if (error instanceof CohereChatError) {
-      console.error('[chat] generate error:', error.statusCode, error.message);
+      console.error('[chat] generate error:', { mode, status: error.statusCode, message: error.message });
       return res.status(error.statusCode).json({
         error: error.message,
         details: error.details,

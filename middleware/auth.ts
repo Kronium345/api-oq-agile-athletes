@@ -41,13 +41,33 @@ function resolveUserIdFromToken(token: string): string | null {
   return token.trim() || null;
 }
 
+export async function tryResolveAuthenticatedUser(
+  req: AuthenticatedRequest
+): Promise<{ user: NonNullable<Awaited<ReturnType<typeof getUserById>>>; userId: string } | null> {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return null;
+  }
+
+  const token = authHeader.split(' ')[1];
+  const verified = verifyAuthToken(token);
+  const resolvedUserId = verified?.userId ?? resolveUserIdFromToken(token);
+  if (!resolvedUserId) return null;
+
+  const user = await getUserById(resolvedUserId);
+  if (!user) return null;
+
+  req.user = user;
+  req.userId = user.userId;
+  return { user, userId: user.userId };
+}
+
 async function authenticate(req: AuthenticatedRequest<any, any, any, any>, res: Response, next: NextFunction): Promise<void> {
   console.log('[auth] request received', { path: req.path, method: req.method });
-  
+
   try {
-    const authHeader = req.headers.authorization;
-    
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    const resolved = await tryResolveAuthenticatedUser(req);
+    if (!resolved) {
       console.log('[auth] missing or invalid bearer header', { path: req.path });
       res.status(401).json({
         success: false,
@@ -56,35 +76,10 @@ async function authenticate(req: AuthenticatedRequest<any, any, any, any>, res: 
       return;
     }
 
-    const token = authHeader.split(' ')[1];
-
-    const verified = verifyAuthToken(token);
-    const resolvedUserId = verified?.userId ?? resolveUserIdFromToken(token);
-
-    if (!resolvedUserId) {
-      console.log('[auth] unable to resolve user id from token', { path: req.path });
-      res.status(401).json({
-        success: false,
-        message: 'Invalid token',
-      });
-      return;
-    }
-
-    console.log('[auth] resolved user id', { path: req.path, userId: resolvedUserId });
-    const user = await getUserById(resolvedUserId);
-    
-    if (!user) {
-      console.log('[auth] user not found for token', { path: req.path, userId: resolvedUserId });
-      res.status(401).json({
-        success: false,
-        message: 'Invalid token',
-      });
-      return;
-    }
-
-    console.log('[auth] authentication successful', { path: req.path, userId: user.userId });
-    req.user = user;
-    req.userId = user.userId;
+    console.log('[auth] authentication successful', {
+      path: req.path,
+      userId: resolved.userId,
+    });
     next();
   } catch (error: any) {
     console.error('[auth] authentication error', {
