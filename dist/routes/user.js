@@ -5,6 +5,7 @@ import path from 'path';
 import { authenticate } from "../middleware/auth.js";
 import { getUserById, updateUser } from "../models/user.js";
 import { addFriendship, getFriendsList, getSuggestions, removeFriendship, updateStepSharing, } from "../services/stepsSocial.js";
+import { geocodeUkPostcode, toGeoPoint } from "../utils/geocode.js";
 import { routeParam } from "../utils/routeParams.js";
 import { prefsFromMobileSettings } from "../utils/emailNotifications.js";
 import { isValidExperience, isValidGender, toClientUser } from "../utils/userResponse.js";
@@ -277,6 +278,37 @@ router.put('/:id/avatar', authenticate, upload.single('avatar'), async (req, res
         const err = error;
         console.error('Upload avatar error:', err);
         return res.status(500).json({ success: false, error: 'Internal server error' });
+    }
+});
+// --- Member gym & location ---
+router.put('/me/gym', authenticate, async (req, res) => {
+    try {
+        const { gymName, postcode } = req.body;
+        if (!gymName?.trim() || !postcode?.trim()) {
+            return res.status(400).json({
+                success: false,
+                error: 'gymName and postcode are required',
+            });
+        }
+        const geo = await geocodeUkPostcode(postcode);
+        const updates = {
+            gymName: gymName.trim(),
+            postcode: geo?.postcode || postcode.trim().toUpperCase(),
+        };
+        if (geo) {
+            updates.location = toGeoPoint(geo.lat, geo.lng);
+        }
+        const updatedUser = await updateUser(req.userId, updates);
+        return res.json({
+            success: true,
+            message: 'Gym location updated',
+            ...toClientUser(updatedUser),
+        });
+    }
+    catch (error) {
+        const err = error;
+        console.error('PUT /user/me/gym error:', err);
+        return res.status(500).json({ success: false, error: 'Failed to update gym location' });
     }
 });
 // --- Profile CRUD (existing; `:userId` alias) ---

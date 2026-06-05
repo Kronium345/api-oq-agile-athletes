@@ -11,6 +11,7 @@ import {
   removeFriendship,
   updateStepSharing,
 } from '../services/stepsSocial.ts';
+import { geocodeUkPostcode, toGeoPoint } from '../utils/geocode.ts';
 import { routeParam } from '../utils/routeParams.ts';
 import { prefsFromMobileSettings } from '../utils/emailNotifications.ts';
 import { isValidExperience, isValidGender, toClientUser } from '../utils/userResponse.ts';
@@ -313,6 +314,40 @@ router.put('/:id/avatar', authenticate, upload.single('avatar'), async (req: Mul
     const err = error as Error;
     console.error('Upload avatar error:', err);
     return res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+// --- Member gym & location ---
+
+router.put('/me/gym', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { gymName, postcode } = req.body as { gymName?: string; postcode?: string };
+    if (!gymName?.trim() || !postcode?.trim()) {
+      return res.status(400).json({
+        success: false,
+        error: 'gymName and postcode are required',
+      });
+    }
+
+    const geo = await geocodeUkPostcode(postcode);
+    const updates: Record<string, unknown> = {
+      gymName: gymName.trim(),
+      postcode: geo?.postcode || postcode.trim().toUpperCase(),
+    };
+    if (geo) {
+      updates.location = toGeoPoint(geo.lat, geo.lng);
+    }
+
+    const updatedUser = await updateUser(req.userId!, updates);
+    return res.json({
+      success: true,
+      message: 'Gym location updated',
+      ...toClientUser(updatedUser!),
+    });
+  } catch (error: unknown) {
+    const err = error as Error;
+    console.error('PUT /user/me/gym error:', err);
+    return res.status(500).json({ success: false, error: 'Failed to update gym location' });
   }
 });
 

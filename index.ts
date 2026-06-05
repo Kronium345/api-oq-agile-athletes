@@ -10,7 +10,9 @@ import { ensureQuizDataSeeded, getQuizBootstrapStatus } from './services/quizBoo
 import { buildDeleteAccountPlayStoreHtml } from './deleteAccountPage.ts';
 import { verifyEmailTransport } from './config/nodemailer.ts';
 import { welcomeEmailLogoUrl } from './utils/send-email.ts';
-import { logQstashStartup } from './utils/upstashEnv.ts';
+import { ensureTrainerProfileIndexes } from './models/trainerProfile.ts';
+import { ensureFitnessGroupIndexes } from './models/fitnessGroup.ts';
+import { ensureTrainerReviewIndexes } from './models/trainerReview.ts';
 
 import analyzeFoodRoutes from './routes/analyzeFood.ts';
 import aiChatRoutes from './routes/aiChat.ts';
@@ -27,12 +29,21 @@ import historyRoutes from './routes/history.ts';
 import stepsRoutes from './routes/steps.ts';
 import userRoutes from './routes/user.ts';
 import userStatsRoutes from './routes/userStats.ts';
+import bookingsRoutes from './routes/bookings.ts';
+import communityRoutes from './routes/community.ts';
+import stripeWebhookRoutes from './routes/stripeWebhook.ts';
+import trainersRoutes from './routes/trainers.ts';
 import workflowRoutes from './routes/workflow.ts';
+import { logQstashStartup } from './utils/upstashEnv.ts';
 
 const app = express();
 const PORT = process.env.PORT || 4000;
 
 app.use(cors());
+
+// Stripe webhooks need raw body — register before JSON parser
+app.use('/webhooks/stripe', express.raw({ type: 'application/json' }), stripeWebhookRoutes);
+
 app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ extended: true }));
 
@@ -59,13 +70,16 @@ app.use('/analyze-food', analyzeFoodRoutes);
 app.use('/api/steps', stepsRoutes);
 app.use('/api/exercises', exercisesRoutes);
 app.use('/api/exercise-recognition', exerciseRecognitionRoutes);
-app.use('/history', historyRoutes); 
-app.use('/favorites', favoritesRoutes); 
+app.use('/history', historyRoutes);
+app.use('/favorites', favoritesRoutes);
 app.use('/user', userRoutes);
 app.use('/user-stats', userStatsRoutes);
 app.use('/workflow', workflowRoutes);
 app.use('/activity', activityRoutes);
-app.use('/uploads', express.static('uploads')); 
+app.use('/trainers', trainersRoutes);
+app.use('/bookings', bookingsRoutes);
+app.use('/community', communityRoutes);
+app.use('/uploads', express.static('uploads'));
 
 app.use((err: any, req: any, res: any, next: any) => {
   console.error('Error:', err);
@@ -86,6 +100,9 @@ app.use((req, res) => {
 async function startServer() {
   try {
     await connectToMongo();
+    await ensureTrainerProfileIndexes();
+    await ensureTrainerReviewIndexes();
+    await ensureFitnessGroupIndexes();
     verifyEmailTransport();
     const welcomeLogo = welcomeEmailLogoUrl();
     if (welcomeLogo) {

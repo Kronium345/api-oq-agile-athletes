@@ -18,6 +18,8 @@ export interface CreateUserParams {
   username?: string;
 }
 
+export type UserRole = 'member' | 'trainer';
+
 export interface User {
   userId: string;
   email: string;
@@ -32,6 +34,11 @@ export interface User {
   avatar?: string | null;
   weight?: number | null;
   unit?: string;
+  roles?: UserRole[];
+  gymName?: string;
+  postcode?: string;
+  location?: { type: 'Point'; coordinates: [number, number] };
+  savedTrainerIds?: string[];
   shareStepsEnabled?: boolean;
   dailyStepGoal?: number;
   emailSubscription?: boolean;
@@ -123,6 +130,8 @@ async function createUser({
     avatar: null,
     weight: null,
     unit: 'kg',
+    roles: ['member'],
+    savedTrainerIds: [],
     shareStepsEnabled: true,
     dailyStepGoal: Number(process.env.DEFAULT_DAILY_STEP_GOAL) || 10000,
     emailSubscription: true,
@@ -259,7 +268,46 @@ async function updateUser(
   return getUserById(userId);
 }
 
+async function addSavedTrainer(userId: string, trainerId: string): Promise<string[]> {
+  const usersCollection = getUsersCollection();
+  await usersCollection.updateOne(
+    { userId },
+    {
+      $addToSet: { savedTrainerIds: trainerId as never },
+      $set: { updatedAt: new Date().toISOString() },
+    }
+  );
+  const user = await getUserById(userId);
+  return (user?.savedTrainerIds as string[]) || [];
+}
+
+async function removeSavedTrainer(userId: string, trainerId: string): Promise<string[]> {
+  const usersCollection = getUsersCollection();
+  await usersCollection.updateOne(
+    { userId },
+    {
+      $pull: { savedTrainerIds: trainerId as never },
+      $set: { updatedAt: new Date().toISOString() },
+    }
+  );
+  const user = await getUserById(userId);
+  return (user?.savedTrainerIds as string[]) || [];
+}
+
+async function addTrainerRole(userId: string): Promise<void> {
+  const usersCollection = getUsersCollection();
+  await usersCollection.updateOne(
+    { userId },
+    {
+      $addToSet: { roles: 'trainer' as never },
+      $set: { updatedAt: new Date().toISOString() },
+    }
+  );
+}
+
 export {
+  addSavedTrainer,
+  addTrainerRole,
   authenticateUser,
   authenticateUserByEmailOrUsername,
   createUser,
@@ -270,5 +318,6 @@ export {
   getUsersByIds,
   listUserSuggestions,
   listUsersWithStepSharing,
+  removeSavedTrainer,
   updateUser,
 };

@@ -36,6 +36,8 @@ async function createUser({ name, email, password, firstName, lastName, username
         avatar: null,
         weight: null,
         unit: 'kg',
+        roles: ['member'],
+        savedTrainerIds: [],
         shareStepsEnabled: true,
         dailyStepGoal: Number(process.env.DEFAULT_DAILY_STEP_GOAL) || 10000,
         emailSubscription: true,
@@ -140,4 +142,29 @@ async function updateUser(userId, updates) {
     await usersCollection.updateOne({ userId }, { $set: updateDoc });
     return getUserById(userId);
 }
-export { authenticateUser, authenticateUserByEmailOrUsername, createUser, getUserByEmail, getUserByUsername, getUserByEmailOrUsername, getUserById, getUsersByIds, listUserSuggestions, listUsersWithStepSharing, updateUser, };
+async function addSavedTrainer(userId, trainerId) {
+    const usersCollection = getUsersCollection();
+    await usersCollection.updateOne({ userId }, {
+        $addToSet: { savedTrainerIds: trainerId },
+        $set: { updatedAt: new Date().toISOString() },
+    });
+    const user = await getUserById(userId);
+    return user?.savedTrainerIds || [];
+}
+async function removeSavedTrainer(userId, trainerId) {
+    const usersCollection = getUsersCollection();
+    await usersCollection.updateOne({ userId }, {
+        $pull: { savedTrainerIds: trainerId },
+        $set: { updatedAt: new Date().toISOString() },
+    });
+    const user = await getUserById(userId);
+    return user?.savedTrainerIds || [];
+}
+async function addTrainerRole(userId) {
+    const usersCollection = getUsersCollection();
+    await usersCollection.updateOne({ userId }, {
+        $addToSet: { roles: 'trainer' },
+        $set: { updatedAt: new Date().toISOString() },
+    });
+}
+export { addSavedTrainer, addTrainerRole, authenticateUser, authenticateUserByEmailOrUsername, createUser, getUserByEmail, getUserByUsername, getUserByEmailOrUsername, getUserById, getUsersByIds, listUserSuggestions, listUsersWithStepSharing, removeSavedTrainer, updateUser, };

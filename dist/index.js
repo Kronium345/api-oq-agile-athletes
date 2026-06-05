@@ -7,7 +7,9 @@ import { ensureQuizDataSeeded, getQuizBootstrapStatus } from "./services/quizBoo
 import { buildDeleteAccountPlayStoreHtml } from "./deleteAccountPage.js";
 import { verifyEmailTransport } from "./config/nodemailer.js";
 import { welcomeEmailLogoUrl } from "./utils/send-email.js";
-import { logQstashStartup } from "./utils/upstashEnv.js";
+import { ensureTrainerProfileIndexes } from "./models/trainerProfile.js";
+import { ensureFitnessGroupIndexes } from "./models/fitnessGroup.js";
+import { ensureTrainerReviewIndexes } from "./models/trainerReview.js";
 import analyzeFoodRoutes from "./routes/analyzeFood.js";
 import aiChatRoutes from "./routes/aiChat.js";
 import activityRoutes from "./routes/activity.js";
@@ -23,10 +25,17 @@ import historyRoutes from "./routes/history.js";
 import stepsRoutes from "./routes/steps.js";
 import userRoutes from "./routes/user.js";
 import userStatsRoutes from "./routes/userStats.js";
+import bookingsRoutes from "./routes/bookings.js";
+import communityRoutes from "./routes/community.js";
+import stripeWebhookRoutes from "./routes/stripeWebhook.js";
+import trainersRoutes from "./routes/trainers.js";
 import workflowRoutes from "./routes/workflow.js";
+import { logQstashStartup } from "./utils/upstashEnv.js";
 const app = express();
 const PORT = process.env.PORT || 4000;
 app.use(cors());
+// Stripe webhooks need raw body — register before JSON parser
+app.use('/webhooks/stripe', express.raw({ type: 'application/json' }), stripeWebhookRoutes);
 app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.get('/', (req, res) => {
@@ -55,6 +64,9 @@ app.use('/user', userRoutes);
 app.use('/user-stats', userStatsRoutes);
 app.use('/workflow', workflowRoutes);
 app.use('/activity', activityRoutes);
+app.use('/trainers', trainersRoutes);
+app.use('/bookings', bookingsRoutes);
+app.use('/community', communityRoutes);
 app.use('/uploads', express.static('uploads'));
 app.use((err, req, res, next) => {
     console.error('Error:', err);
@@ -73,6 +85,9 @@ app.use((req, res) => {
 async function startServer() {
     try {
         await connectToMongo();
+        await ensureTrainerProfileIndexes();
+        await ensureTrainerReviewIndexes();
+        await ensureFitnessGroupIndexes();
         verifyEmailTransport();
         const welcomeLogo = welcomeEmailLogoUrl();
         if (welcomeLogo) {

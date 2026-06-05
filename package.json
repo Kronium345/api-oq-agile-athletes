@@ -8,6 +8,7 @@
     "dev": "nodemon --exec \"node --import tsx\" index.ts",
     "dev:ts-node": "nodemon --exec \"npx ts-node --esm\" index.ts",
     "build": "tsc",
+    "seed:trainers": "node --import tsx scripts/seedTrainers.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -27,6 +28,7 @@
     "multer": "^2.0.2",
     "nodemailer": "^8.0.10",
     "sharp": "^0.34.5",
+    "stripe": "^22.2.0",
     "uuid": "^11.0.3"
   },
   "devDependencies": {
