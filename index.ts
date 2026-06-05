@@ -7,6 +7,7 @@ import {
   getFoodVisionProvider,
 } from './services/foodVisionClient.ts';
 import { ensureQuizDataSeeded, getQuizBootstrapStatus } from './services/quizBootstrap.ts';
+import { ensureTrainerDataSeeded } from './services/trainerBootstrap.ts';
 import { buildDeleteAccountPlayStoreHtml } from './deleteAccountPage.ts';
 import { verifyEmailTransport } from './config/nodemailer.ts';
 import { welcomeEmailLogoUrl } from './utils/send-email.ts';
@@ -118,6 +119,15 @@ async function startServer() {
       categories: quizStatus.categoriesCount,
       readyForQuizUi: quizStatus.readyForQuizUi,
       readyForPredict: quizStatus.readyForPredict,
+    });
+
+    const trainerSeed = await ensureTrainerDataSeeded();
+    console.log('[trainers] PT Network seed:', {
+      enabled: trainerSeed.enabled,
+      trainersSeeded: trainerSeed.trainersSeeded,
+      publishedTrainerCount: trainerSeed.trainerCount,
+      groupsSeeded: trainerSeed.groupsSeeded,
+      groupCount: trainerSeed.groupCount,
     });
 
     const foodVisionProvider = getFoodVisionProvider();

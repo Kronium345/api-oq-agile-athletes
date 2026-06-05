@@ -4,6 +4,7 @@ import express from 'express';
 import { connectToMongo } from "./config/mongoClient.js";
 import { checkFoodVisionReady, getFoodVisionProvider, } from "./services/foodVisionClient.js";
 import { ensureQuizDataSeeded, getQuizBootstrapStatus } from "./services/quizBootstrap.js";
+import { ensureTrainerDataSeeded } from "./services/trainerBootstrap.js";
 import { buildDeleteAccountPlayStoreHtml } from "./deleteAccountPage.js";
 import { verifyEmailTransport } from "./config/nodemailer.js";
 import { welcomeEmailLogoUrl } from "./utils/send-email.js";
@@ -104,6 +105,14 @@ async function startServer() {
             categories: quizStatus.categoriesCount,
             readyForQuizUi: quizStatus.readyForQuizUi,
             readyForPredict: quizStatus.readyForPredict,
+        });
+        const trainerSeed = await ensureTrainerDataSeeded();
+        console.log('[trainers] PT Network seed:', {
+            enabled: trainerSeed.enabled,
+            trainersSeeded: trainerSeed.trainersSeeded,
+            publishedTrainerCount: trainerSeed.trainerCount,
+            groupsSeeded: trainerSeed.groupsSeeded,
+            groupCount: trainerSeed.groupCount,
         });
         const foodVisionProvider = getFoodVisionProvider();
         if (foodVisionProvider === 'http') {
