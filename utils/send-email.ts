@@ -201,7 +201,7 @@ function buildWelcomeEmailHtml(userName: string, appLink: string): string {
 
             <div style="background: ${c.accentBg}; border-radius: 12px; padding: 18px 20px; border-left: 4px solid ${c.primary}; margin-bottom: 22px;">
               <h2 style="font-size: 16px; color: ${c.primaryDark}; margin: 0 0 8px;">Premium</h2>
-              <p style="margin: 0 0 12px; font-size: 14px; color: ${c.muted};">Subscribe anytime from the in-app subscription screen (RevenueCat) to unlock:</p>
+              <p style="margin: 0 0 12px; font-size: 14px; color: ${c.muted};">Subscribe anytime to unlock:</p>
               <ul style="margin: 0; padding-left: 20px; font-size: 14px; color: ${c.text};">
                 <li><strong>Exercise favorites</strong> — save exercises and use the Favorites tab</li>
                 <li><strong>Workout history</strong> — view past logged workouts</li>
