@@ -4,6 +4,14 @@ import { analyzeExerciseImage } from '../services/exerciseRecognition.ts';
 
 const router = express.Router();
 
+/** Exercises11 GIF host — may use a different RapidAPI key than ExerciseDB. */
+function getExercises11RapidApiKey(): string | undefined {
+  return (
+    process.env.EXERCISES11_RAPID_API_KEY?.trim() ||
+    process.env.RAPID_API_KEY?.trim() ||
+    undefined
+  );
+}
 
 router.post('/enhance', async (req: Request, res: Response) => {
   console.log('🏋️ EXERCISE ENHANCEMENT REQUEST RECEIVED');
@@ -198,6 +206,11 @@ router.post('/enhance', async (req: Request, res: Response) => {
     }
 
     console.log('🖼️ Fetching images from Exercises11 and analyzing with Clarifai...');
+
+    const exercises11Key = getExercises11RapidApiKey();
+    if (!exercises11Key) {
+      console.warn('⚠️  EXERCISES11_RAPID_API_KEY (or RAPID_API_KEY) not set — exercise GIFs will fail');
+    }
     
     const enhancedExercises = await Promise.all(
       exercises.map(async (exercise: any) => {
@@ -209,12 +222,16 @@ router.post('/enhance', async (req: Request, res: Response) => {
           console.log(`📸 Fetching image for: ${exercise.name} (ID: ${exercise.id})`);
           console.log(`   Source URL: ${sourceImageUrl}`);
           console.log(`   Proxied URL: ${proxiedImageUrl}`);
+
+          if (!exercises11Key) {
+            throw new Error('EXERCISES11_RAPID_API_KEY not configured');
+          }
           
           // Fetch image from Exercises11 with proper headers
           const imageResponse = await axios.get(sourceImageUrl, { 
             responseType: 'arraybuffer',
             headers: {
-              'X-RapidAPI-Key': RAPID_API_KEY,
+              'X-RapidAPI-Key': exercises11Key,
               'X-RapidAPI-Host': 'exercises11.p.rapidapi.com'
             }
           });
@@ -313,10 +330,12 @@ router.post('/enhance', async (req: Request, res: Response) => {
 router.get('/image/:exerciseId', async (req: Request, res: Response) => {
   try {
     const { exerciseId } = req.params;
-    const RAPID_API_KEY = process.env.RAPID_API_KEY;
+    const exercises11Key = getExercises11RapidApiKey();
 
-    if (!RAPID_API_KEY) {
-      return res.status(500).json({ error: 'RapidAPI key not configured' });
+    if (!exercises11Key) {
+      return res.status(500).json({
+        error: 'Exercises11 RapidAPI key not configured (set EXERCISES11_RAPID_API_KEY)',
+      });
     }
 
     const imageUrl = `https://exercises11.p.rapidapi.com/images/${exerciseId}.gif`;
@@ -326,7 +345,7 @@ router.get('/image/:exerciseId', async (req: Request, res: Response) => {
     const imageResponse = await axios.get(imageUrl, {
       responseType: 'stream',
       headers: {
-        'X-RapidAPI-Key': RAPID_API_KEY,
+        'X-RapidAPI-Key': exercises11Key,
         'X-RapidAPI-Host': 'exercises11.p.rapidapi.com'
       }
     });
