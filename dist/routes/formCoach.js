@@ -3,7 +3,7 @@ import multer from 'multer';
 import path from 'path';
 import { authenticate } from "../middleware/auth.js";
 import { ensureFormAnalysisIndexes, listFormAnalysesForUser, saveFormAnalysis } from "../models/formAnalysis.js";
-import { analyzeFormVideo, fetchVideoFromUrl, FormCoachError, getFormCoachHealth, MAX_VIDEO_BYTES, } from "../services/formCoachClient.js";
+import { analyzeFormVideo, fetchVideoFromUrl, FormCoachError, getFormCoachExercises, getFormCoachHealth, MAX_VIDEO_BYTES, normalizeExerciseId, validateExerciseForAnalysis, } from "../services/formCoachClient.js";
 import { formCoachRateLimiter } from "../utils/formCoachRateLimit.js";
 const router = express.Router();
 const ALLOWED_EXTENSIONS = new Set(['.mp4', '.mov', '.avi', '.mkv']);
@@ -31,12 +31,8 @@ router.use(async (_req, _res, next) => {
         next(err);
     }
 });
-function normalizeExercise(value) {
-    const exercise = typeof value === 'string' && value.trim() ? value.trim().toLowerCase() : 'squat';
-    if (exercise !== 'squat') {
-        throw new FormCoachError(`Unsupported exercise "${exercise}". MVP supports: squat`, 400);
-    }
-    return exercise;
+function resolveExerciseId(value) {
+    return normalizeExerciseId(value);
 }
 function toClientAnalysis(record) {
     return {
@@ -49,6 +45,23 @@ function toClientAnalysis(record) {
         videoUrl: record.videoUrl,
     };
 }
+router.get('/exercises', async (_req, res) => {
+    try {
+        const catalog = await getFormCoachExercises();
+        return res.json({ success: true, ...catalog });
+    }
+    catch (error) {
+        if (error instanceof FormCoachError) {
+            return res.status(error.statusCode).json({
+                success: false,
+                error: error.message,
+                details: error.details,
+            });
+        }
+        console.error('[form-coach] exercises error:', error);
+        return res.status(502).json({ success: false, error: 'Form Coach exercises catalog failed' });
+    }
+});
 router.get('/health', async (_req, res) => {
     try {
         const health = await getFormCoachHealth();
@@ -100,7 +113,8 @@ router.post('/analyze', authenticate, formCoachRateLimiter, (req, res, next) => 
     });
 }, async (req, res) => {
     try {
-        const exercise = normalizeExercise(req.body?.exercise ?? req.query?.exercise);
+        const exerciseId = resolveExerciseId(req.body?.exercise ?? req.query?.exercise);
+        await validateExerciseForAnalysis(exerciseId);
         const videoUrl = typeof req.body?.videoUrl === 'string' ? req.body.videoUrl.trim() : undefined;
         let videoBuffer;
         let filename;
@@ -126,16 +140,17 @@ router.post('/analyze', authenticate, formCoachRateLimiter, (req, res, next) => 
             videoBuffer,
             filename,
             contentType,
-            exercise,
+            exercise: exerciseId,
         });
         const saved = await saveFormAnalysis({
             userId: req.userId,
-            result,
+            result: { ...result, exercise: exerciseId },
             videoUrl: videoUrl || undefined,
         });
         return res.json({
             success: true,
             ...result,
+            exercise: exerciseId,
             analysis: toClientAnalysis(saved),
         });
     }

@@ -29,6 +29,81 @@ export interface FormCoachHealthResult {
   exercises?: string[];
 }
 
+export interface FormCoachCatalogExercise {
+  id: string;
+  name?: string;
+  filming_tip?: string;
+  available?: boolean;
+  [key: string]: unknown;
+}
+
+export interface FormCoachCatalogResult {
+  exercises: FormCoachCatalogExercise[];
+  coach_enabled: Array<string | FormCoachCatalogExercise>;
+  specialized: Array<string | FormCoachCatalogExercise>;
+  coach_launch: Array<string | FormCoachCatalogExercise>;
+}
+
+/** Legacy MVP id → catalog id */
+const LEGACY_EXERCISE_ALIASES: Record<string, string> = {
+  squat: 'back_squat',
+};
+
+export function normalizeExerciseId(raw: unknown, defaultId = 'back_squat'): string {
+  const id = typeof raw === 'string' && raw.trim() ? raw.trim().toLowerCase() : defaultId;
+  return LEGACY_EXERCISE_ALIASES[id] || id;
+}
+
+function catalogEntryId(entry: string | FormCoachCatalogExercise): string | null {
+  if (typeof entry === 'string') return entry.trim().toLowerCase() || null;
+  if (entry && typeof entry.id === 'string') return entry.id.trim().toLowerCase();
+  return null;
+}
+
+function catalogEntryAvailable(entry: string | FormCoachCatalogExercise): boolean {
+  if (typeof entry === 'string') return true;
+  return entry.available !== false;
+}
+
+/** Build map of exercise id → enabled for analysis (from coach_enabled + exercises[].available). */
+export function buildCoachEnabledMap(catalog: FormCoachCatalogResult): Map<string, boolean> {
+  const enabled = new Map<string, boolean>();
+
+  for (const entry of catalog.coach_enabled || []) {
+    const id = catalogEntryId(entry);
+    if (id) enabled.set(id, catalogEntryAvailable(entry));
+  }
+
+  for (const ex of catalog.exercises || []) {
+    const id = ex.id?.trim().toLowerCase();
+    if (!id) continue;
+    if (!enabled.has(id)) {
+      enabled.set(id, ex.available !== false);
+    }
+  }
+
+  return enabled;
+}
+
+export function assertExerciseEnabled(
+  exerciseId: string,
+  catalog: FormCoachCatalogResult
+): void {
+  const enabled = buildCoachEnabledMap(catalog);
+  if (!enabled.has(exerciseId)) {
+    throw new FormCoachError(
+      `Exercise "${exerciseId}" is not available for form analysis.`,
+      400
+    );
+  }
+  if (enabled.get(exerciseId) === false) {
+    throw new FormCoachError(
+      `Exercise "${exerciseId}" is not enabled for coaching yet.`,
+      400
+    );
+  }
+}
+
 const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
 const RETRYABLE_STATUSES = new Set([503, 502, 504]);
 
@@ -150,6 +225,38 @@ async function requestWithRetry(
 }
 
 let healthCache: { data: FormCoachHealthResult; expiresAt: number } | null = null;
+let exercisesCache: { data: FormCoachCatalogResult; expiresAt: number } | null = null;
+
+export async function getFormCoachExercises(
+  forceRefresh = false
+): Promise<FormCoachCatalogResult> {
+  const cacheMs = Number(
+    process.env.FORM_COACH_EXERCISES_CACHE_MS ||
+      process.env.FORM_COACH_HEALTH_CACHE_MS ||
+      60_000
+  );
+  const now = Date.now();
+
+  if (!forceRefresh && exercisesCache && exercisesCache.expiresAt > now) {
+    return exercisesCache.data;
+  }
+
+  const res = await fetchWithTimeout(`${getBaseUrl()}/exercises`, { method: 'GET' }, 15_000);
+
+  if (!res.ok) {
+    const detail = parseErrorDetail(await res.json().catch(() => null));
+    throw mapHttpError(res.status, detail);
+  }
+
+  const data = (await res.json()) as FormCoachCatalogResult;
+  exercisesCache = { data, expiresAt: now + cacheMs };
+  return data;
+}
+
+export async function validateExerciseForAnalysis(exerciseId: string): Promise<void> {
+  const catalog = await getFormCoachExercises();
+  assertExerciseEnabled(exerciseId, catalog);
+}
 
 export async function getFormCoachHealth(forceRefresh = false): Promise<FormCoachHealthResult> {
   const cacheMs = Number(process.env.FORM_COACH_HEALTH_CACHE_MS || 30_000);
@@ -174,7 +281,9 @@ export async function getFormCoachHealth(forceRefresh = false): Promise<FormCoac
 export async function checkFormCoachReady(): Promise<boolean> {
   try {
     const health = await getFormCoachHealth();
-    return health.status === 'ok' || health.status === 'healthy';
+    const statusOk = health.status === 'ok' || health.status === 'healthy';
+    const hasExercises = Array.isArray(health.exercises) && health.exercises.length > 0;
+    return statusOk && hasExercises;
   } catch {
     return false;
   }
@@ -202,7 +311,7 @@ export async function analyzeFormVideo(params: {
     type: params.contentType || 'video/mp4',
   });
   form.append('video', blob, params.filename);
-  form.append('exercise', params.exercise || 'squat');
+  form.append('exercise', params.exercise || 'back_squat');
 
   const res = await requestWithRetry(`${getBaseUrl()}/analyze-form`, {
     method: 'POST',

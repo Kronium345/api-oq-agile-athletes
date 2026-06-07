@@ -6,6 +6,53 @@ export class FormCoachError extends Error {
         this.details = details;
     }
 }
+/** Legacy MVP id → catalog id */
+const LEGACY_EXERCISE_ALIASES = {
+    squat: 'back_squat',
+};
+export function normalizeExerciseId(raw, defaultId = 'back_squat') {
+    const id = typeof raw === 'string' && raw.trim() ? raw.trim().toLowerCase() : defaultId;
+    return LEGACY_EXERCISE_ALIASES[id] || id;
+}
+function catalogEntryId(entry) {
+    if (typeof entry === 'string')
+        return entry.trim().toLowerCase() || null;
+    if (entry && typeof entry.id === 'string')
+        return entry.id.trim().toLowerCase();
+    return null;
+}
+function catalogEntryAvailable(entry) {
+    if (typeof entry === 'string')
+        return true;
+    return entry.available !== false;
+}
+/** Build map of exercise id → enabled for analysis (from coach_enabled + exercises[].available). */
+export function buildCoachEnabledMap(catalog) {
+    const enabled = new Map();
+    for (const entry of catalog.coach_enabled || []) {
+        const id = catalogEntryId(entry);
+        if (id)
+            enabled.set(id, catalogEntryAvailable(entry));
+    }
+    for (const ex of catalog.exercises || []) {
+        const id = ex.id?.trim().toLowerCase();
+        if (!id)
+            continue;
+        if (!enabled.has(id)) {
+            enabled.set(id, ex.available !== false);
+        }
+    }
+    return enabled;
+}
+export function assertExerciseEnabled(exerciseId, catalog) {
+    const enabled = buildCoachEnabledMap(catalog);
+    if (!enabled.has(exerciseId)) {
+        throw new FormCoachError(`Exercise "${exerciseId}" is not available for form analysis.`, 400);
+    }
+    if (enabled.get(exerciseId) === false) {
+        throw new FormCoachError(`Exercise "${exerciseId}" is not enabled for coaching yet.`, 400);
+    }
+}
 const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
 const RETRYABLE_STATUSES = new Set([503, 502, 504]);
 function getBaseUrl() {
@@ -98,6 +145,28 @@ async function requestWithRetry(url, init) {
     throw lastError || new FormCoachError('Form Coach request failed', 502);
 }
 let healthCache = null;
+let exercisesCache = null;
+export async function getFormCoachExercises(forceRefresh = false) {
+    const cacheMs = Number(process.env.FORM_COACH_EXERCISES_CACHE_MS ||
+        process.env.FORM_COACH_HEALTH_CACHE_MS ||
+        60000);
+    const now = Date.now();
+    if (!forceRefresh && exercisesCache && exercisesCache.expiresAt > now) {
+        return exercisesCache.data;
+    }
+    const res = await fetchWithTimeout(`${getBaseUrl()}/exercises`, { method: 'GET' }, 15000);
+    if (!res.ok) {
+        const detail = parseErrorDetail(await res.json().catch(() => null));
+        throw mapHttpError(res.status, detail);
+    }
+    const data = (await res.json());
+    exercisesCache = { data, expiresAt: now + cacheMs };
+    return data;
+}
+export async function validateExerciseForAnalysis(exerciseId) {
+    const catalog = await getFormCoachExercises();
+    assertExerciseEnabled(exerciseId, catalog);
+}
 export async function getFormCoachHealth(forceRefresh = false) {
     const cacheMs = Number(process.env.FORM_COACH_HEALTH_CACHE_MS || 30000);
     const now = Date.now();
@@ -116,7 +185,9 @@ export async function getFormCoachHealth(forceRefresh = false) {
 export async function checkFormCoachReady() {
     try {
         const health = await getFormCoachHealth();
-        return health.status === 'ok' || health.status === 'healthy';
+        const statusOk = health.status === 'ok' || health.status === 'healthy';
+        const hasExercises = Array.isArray(health.exercises) && health.exercises.length > 0;
+        return statusOk && hasExercises;
     }
     catch {
         return false;
@@ -137,7 +208,7 @@ export async function analyzeFormVideo(params) {
         type: params.contentType || 'video/mp4',
     });
     form.append('video', blob, params.filename);
-    form.append('exercise', params.exercise || 'squat');
+    form.append('exercise', params.exercise || 'back_squat');
     const res = await requestWithRetry(`${getBaseUrl()}/analyze-form`, {
         method: 'POST',
         body: form,

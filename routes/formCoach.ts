@@ -7,8 +7,11 @@ import {
   analyzeFormVideo,
   fetchVideoFromUrl,
   FormCoachError,
+  getFormCoachExercises,
   getFormCoachHealth,
   MAX_VIDEO_BYTES,
+  normalizeExerciseId,
+  validateExerciseForAnalysis,
 } from '../services/formCoachClient.ts';
 import { formCoachRateLimiter } from '../utils/formCoachRateLimit.ts';
 
@@ -42,12 +45,8 @@ router.use(async (_req, _res, next) => {
   }
 });
 
-function normalizeExercise(value: unknown): string {
-  const exercise = typeof value === 'string' && value.trim() ? value.trim().toLowerCase() : 'squat';
-  if (exercise !== 'squat') {
-    throw new FormCoachError(`Unsupported exercise "${exercise}". MVP supports: squat`, 400);
-  }
-  return exercise;
+function resolveExerciseId(value: unknown): string {
+  return normalizeExerciseId(value);
 }
 
 function toClientAnalysis(record: Awaited<ReturnType<typeof saveFormAnalysis>>) {
@@ -61,6 +60,23 @@ function toClientAnalysis(record: Awaited<ReturnType<typeof saveFormAnalysis>>) 
     videoUrl: record.videoUrl,
   };
 }
+
+router.get('/exercises', async (_req, res: Response) => {
+  try {
+    const catalog = await getFormCoachExercises();
+    return res.json({ success: true, ...catalog });
+  } catch (error: unknown) {
+    if (error instanceof FormCoachError) {
+      return res.status(error.statusCode).json({
+        success: false,
+        error: error.message,
+        details: error.details,
+      });
+    }
+    console.error('[form-coach] exercises error:', error);
+    return res.status(502).json({ success: false, error: 'Form Coach exercises catalog failed' });
+  }
+});
 
 router.get('/health', async (_req, res: Response) => {
   try {
@@ -119,7 +135,9 @@ router.post(
   },
   async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const exercise = normalizeExercise(req.body?.exercise ?? req.query?.exercise);
+      const exerciseId = resolveExerciseId(req.body?.exercise ?? req.query?.exercise);
+      await validateExerciseForAnalysis(exerciseId);
+
       const videoUrl =
         typeof req.body?.videoUrl === 'string' ? req.body.videoUrl.trim() : undefined;
 
@@ -147,18 +165,19 @@ router.post(
         videoBuffer,
         filename,
         contentType,
-        exercise,
+        exercise: exerciseId,
       });
 
       const saved = await saveFormAnalysis({
         userId: req.userId!,
-        result,
+        result: { ...result, exercise: exerciseId },
         videoUrl: videoUrl || undefined,
       });
 
       return res.json({
         success: true,
         ...result,
+        exercise: exerciseId,
         analysis: toClientAnalysis(saved),
       });
     } catch (error: unknown) {
