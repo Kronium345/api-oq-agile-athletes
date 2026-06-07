@@ -35,6 +35,8 @@ import communityRoutes from './routes/community.ts';
 import stripeWebhookRoutes from './routes/stripeWebhook.ts';
 import trainersRoutes from './routes/trainers.ts';
 import workflowRoutes from './routes/workflow.ts';
+import formCoachRoutes from './routes/formCoach.ts';
+import { checkFormCoachReady } from './services/formCoachClient.ts';
 import { logQstashStartup } from './utils/upstashEnv.ts';
 
 const app = express();
@@ -71,6 +73,7 @@ app.use('/analyze-food', analyzeFoodRoutes);
 app.use('/api/steps', stepsRoutes);
 app.use('/api/exercises', exercisesRoutes);
 app.use('/api/exercise-recognition', exerciseRecognitionRoutes);
+app.use('/api/form-coach', formCoachRoutes);
 app.use('/history', historyRoutes);
 app.use('/favorites', favoritesRoutes);
 app.use('/user', userRoutes);
@@ -141,6 +144,18 @@ async function startServer() {
       }
     } else {
       console.log('[food-vision] provider=clarifai');
+    }
+
+    if (process.env.FORM_COACH_API_URL?.trim()) {
+      const formCoachReady = await checkFormCoachReady();
+      console.log('[form-coach] service configured:', { ready: formCoachReady });
+      if (!formCoachReady) {
+        console.warn(
+          '[form-coach] Python service /health is not OK yet (Render cold start). Analysis may fail until it wakes.'
+        );
+      }
+    } else {
+      console.log('[form-coach] FORM_COACH_API_URL not set — form analysis disabled');
     }
 
     const server = app.listen(PORT, () => {
