@@ -3,74 +3,89 @@ import type { PartnerConnectRequest } from '../models/partnerConnectRequest.ts';
 import type { UserWithoutPassword } from '../models/user.ts';
 import { getDisplayName } from './userDisplay.ts';
 
-export interface PartnerListItem {
+export interface CommunityUserProfile {
   userId: string;
   displayName: string;
+  gymName?: string;
+  postcode?: string;
+  experience?: string;
+  gender?: string;
+  weight?: number;
+  unit?: string;
+  goal?: string;
+}
+
+export interface PartnerListItem extends CommunityUserProfile {
   avatar: string | null;
-  gymName?: string | null;
-  goal?: string | null;
-  experience?: string | null;
 }
 
-export function toPartnerListItem(user: Record<string, unknown>): PartnerListItem {
-  const displayName = getDisplayName(user as { name?: string; firstName?: string; username?: string });
-  const goal =
-    typeof user.goal === 'string'
-      ? user.goal
-      : typeof user.fitnessGoal === 'string'
-        ? user.fitnessGoal
-        : null;
-
-  return {
-    userId: String(user.userId),
-    displayName,
-    avatar: typeof user.avatar === 'string' ? user.avatar : null,
-    gymName: typeof user.gymName === 'string' ? user.gymName : null,
-    goal,
-    experience: typeof user.experience === 'string' ? user.experience : null,
-  };
-}
-
-export interface ConnectionRequestItem {
-  requestId: string;
-  direction: 'incoming' | 'outgoing';
-  userId: string;
-  displayName: string;
-  avatar: string | null;
-  gymName?: string | null;
-  experience?: string | null;
-  goal?: string | null;
-  status: 'pending';
-  createdAt: string;
-}
-
-export function toConnectionRequestItem(
-  request: PartnerConnectRequest,
-  otherUser: UserWithoutPassword | undefined,
-  direction: 'incoming' | 'outgoing'
-): ConnectionRequestItem {
-  const profile = otherUser as Record<string, unknown> | undefined;
+export function toCommunityUserProfile(
+  user: UserWithoutPassword | Record<string, unknown> | undefined
+): CommunityUserProfile {
+  const profile = user as Record<string, unknown> | undefined;
   const goal =
     profile && typeof profile.goal === 'string'
       ? profile.goal
       : profile && typeof profile.fitnessGoal === 'string'
         ? profile.fitnessGoal
-        : null;
-
-  const otherUserId = direction === 'incoming' ? request.fromUserId : request.toUserId;
+        : undefined;
 
   return {
-    requestId: request.requestId,
-    direction,
-    userId: otherUserId,
-    displayName: otherUser ? getDisplayName(otherUser) : 'User',
-    avatar: otherUser && typeof otherUser.avatar === 'string' ? otherUser.avatar : null,
-    gymName: otherUser && typeof otherUser.gymName === 'string' ? otherUser.gymName : null,
-    experience:
-      otherUser && typeof otherUser.experience === 'string' ? otherUser.experience : null,
+    userId: profile ? String(profile.userId) : '',
+    displayName: profile ? getDisplayName(profile as UserWithoutPassword) : 'User',
+    gymName: typeof profile?.gymName === 'string' ? profile.gymName : undefined,
+    postcode: typeof profile?.postcode === 'string' ? profile.postcode : undefined,
+    experience: typeof profile?.experience === 'string' ? profile.experience : undefined,
+    gender: typeof profile?.gender === 'string' ? profile.gender : undefined,
+    weight: typeof profile?.weight === 'number' ? profile.weight : undefined,
+    unit: typeof profile?.unit === 'string' ? profile.unit : undefined,
     goal,
+  };
+}
+
+export function toPartnerListItem(user: Record<string, unknown>): PartnerListItem {
+  return {
+    ...toCommunityUserProfile(user),
+    avatar: typeof user.avatar === 'string' ? user.avatar : null,
+  };
+}
+
+export interface PendingConnectionRequest {
+  id: string;
+  status: 'pending';
+  direction: 'incoming' | 'outgoing';
+  createdAt: string;
+  user: CommunityUserProfile;
+}
+
+export function toPendingConnectionRequest(
+  request: PartnerConnectRequest,
+  otherUser: UserWithoutPassword | undefined,
+  direction: 'incoming' | 'outgoing'
+): PendingConnectionRequest {
+  return {
+    id: request.requestId,
     status: 'pending',
+    direction,
     createdAt: request.createdAt,
+    user: toCommunityUserProfile(otherUser),
+  };
+}
+
+export interface AcceptedConnection {
+  id: string;
+  status: 'accepted';
+  user: CommunityUserProfile;
+}
+
+export function toAcceptedConnection(
+  friendUser: UserWithoutPassword,
+  connectionId: string
+): AcceptedConnection {
+  return {
+    id: connectionId,
+    status: 'accepted',
+    user: toCommunityUserProfile(friendUser),
   };
 }
 

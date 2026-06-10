@@ -10,6 +10,7 @@ import { listTrainingPartners } from '../services/communityPartners.ts';
 import {
   acceptConnection,
   declineConnection,
+  listAcceptedConnections,
   listPendingConnections,
   sendPartnerConnect,
 } from '../services/partnerConnections.ts';
@@ -93,14 +94,24 @@ router.get(
   authenticate,
   async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { incoming, outgoing } = await listPendingConnections(req.userId!);
-      return res.json({ success: true, incoming, outgoing });
+      const { requests } = await listPendingConnections(req.userId!);
+      return res.json({ success: true, requests });
     } catch (error: unknown) {
       console.error('GET /community/connections/pending error:', error);
       return res.status(500).json({ success: false, message: 'Failed to fetch connection requests' });
     }
   }
 );
+
+router.get('/connections', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { connections } = await listAcceptedConnections(req.userId!);
+    return res.json({ success: true, connections });
+  } catch (error: unknown) {
+    console.error('GET /community/connections error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to fetch connections' });
+  }
+});
 
 router.post(
   '/connections/:requestId/accept',
@@ -114,7 +125,7 @@ router.post(
         return res.status(result.httpStatus).json({ success: false, message: result.message });
       }
 
-      return res.json({ success: true, message: result.message, status: 'accepted' });
+      return res.json({ success: true });
     } catch (error: unknown) {
       console.error('POST /community/connections/:requestId/accept error:', error);
       return res.status(500).json({ success: false, message: 'Failed to accept connection request' });
@@ -134,7 +145,7 @@ router.post(
         return res.status(result.httpStatus).json({ success: false, message: result.message });
       }
 
-      return res.json({ success: true, message: result.message, status: 'declined' });
+      return res.json({ success: true });
     } catch (error: unknown) {
       console.error('POST /community/connections/:requestId/decline error:', error);
       return res.status(500).json({ success: false, message: 'Failed to decline connection request' });

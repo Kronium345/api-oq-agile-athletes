@@ -3,7 +3,7 @@ import { authenticate } from "../middleware/auth.js";
 import { ensureFitnessGroupIndexes, getFitnessGroupById, listFitnessGroups, } from "../models/fitnessGroup.js";
 import { getUserById } from "../models/user.js";
 import { listTrainingPartners } from "../services/communityPartners.js";
-import { acceptConnection, declineConnection, listPendingConnections, sendPartnerConnect, } from "../services/partnerConnections.js";
+import { acceptConnection, declineConnection, listAcceptedConnections, listPendingConnections, sendPartnerConnect, } from "../services/partnerConnections.js";
 import { geocodeUkPostcode } from "../utils/geocode.js";
 import { parseQueryNumber, toClientGroup } from "../utils/communityResponse.js";
 import { routeParam } from "../utils/routeParams.js";
@@ -65,12 +65,22 @@ router.post('/partners/:userId/connect', authenticate, async (req, res) => {
 });
 router.get('/connections/pending', authenticate, async (req, res) => {
     try {
-        const { incoming, outgoing } = await listPendingConnections(req.userId);
-        return res.json({ success: true, incoming, outgoing });
+        const { requests } = await listPendingConnections(req.userId);
+        return res.json({ success: true, requests });
     }
     catch (error) {
         console.error('GET /community/connections/pending error:', error);
         return res.status(500).json({ success: false, message: 'Failed to fetch connection requests' });
+    }
+});
+router.get('/connections', authenticate, async (req, res) => {
+    try {
+        const { connections } = await listAcceptedConnections(req.userId);
+        return res.json({ success: true, connections });
+    }
+    catch (error) {
+        console.error('GET /community/connections error:', error);
+        return res.status(500).json({ success: false, message: 'Failed to fetch connections' });
     }
 });
 router.post('/connections/:requestId/accept', authenticate, async (req, res) => {
@@ -80,7 +90,7 @@ router.post('/connections/:requestId/accept', authenticate, async (req, res) => 
         if (result.ok === false) {
             return res.status(result.httpStatus).json({ success: false, message: result.message });
         }
-        return res.json({ success: true, message: result.message, status: 'accepted' });
+        return res.json({ success: true });
     }
     catch (error) {
         console.error('POST /community/connections/:requestId/accept error:', error);
@@ -94,7 +104,7 @@ router.post('/connections/:requestId/decline', authenticate, async (req, res) =>
         if (result.ok === false) {
             return res.status(result.httpStatus).json({ success: false, message: result.message });
         }
-        return res.json({ success: true, message: result.message, status: 'declined' });
+        return res.json({ success: true });
     }
     catch (error) {
         console.error('POST /community/connections/:requestId/decline error:', error);

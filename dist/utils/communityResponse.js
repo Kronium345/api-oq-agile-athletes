@@ -1,39 +1,43 @@
 import { getDisplayName } from "./userDisplay.js";
-export function toPartnerListItem(user) {
-    const displayName = getDisplayName(user);
-    const goal = typeof user.goal === 'string'
-        ? user.goal
-        : typeof user.fitnessGoal === 'string'
-            ? user.fitnessGoal
-            : null;
-    return {
-        userId: String(user.userId),
-        displayName,
-        avatar: typeof user.avatar === 'string' ? user.avatar : null,
-        gymName: typeof user.gymName === 'string' ? user.gymName : null,
-        goal,
-        experience: typeof user.experience === 'string' ? user.experience : null,
-    };
-}
-export function toConnectionRequestItem(request, otherUser, direction) {
-    const profile = otherUser;
+export function toCommunityUserProfile(user) {
+    const profile = user;
     const goal = profile && typeof profile.goal === 'string'
         ? profile.goal
         : profile && typeof profile.fitnessGoal === 'string'
             ? profile.fitnessGoal
-            : null;
-    const otherUserId = direction === 'incoming' ? request.fromUserId : request.toUserId;
+            : undefined;
     return {
-        requestId: request.requestId,
-        direction,
-        userId: otherUserId,
-        displayName: otherUser ? getDisplayName(otherUser) : 'User',
-        avatar: otherUser && typeof otherUser.avatar === 'string' ? otherUser.avatar : null,
-        gymName: otherUser && typeof otherUser.gymName === 'string' ? otherUser.gymName : null,
-        experience: otherUser && typeof otherUser.experience === 'string' ? otherUser.experience : null,
+        userId: profile ? String(profile.userId) : '',
+        displayName: profile ? getDisplayName(profile) : 'User',
+        gymName: typeof profile?.gymName === 'string' ? profile.gymName : undefined,
+        postcode: typeof profile?.postcode === 'string' ? profile.postcode : undefined,
+        experience: typeof profile?.experience === 'string' ? profile.experience : undefined,
+        gender: typeof profile?.gender === 'string' ? profile.gender : undefined,
+        weight: typeof profile?.weight === 'number' ? profile.weight : undefined,
+        unit: typeof profile?.unit === 'string' ? profile.unit : undefined,
         goal,
+    };
+}
+export function toPartnerListItem(user) {
+    return {
+        ...toCommunityUserProfile(user),
+        avatar: typeof user.avatar === 'string' ? user.avatar : null,
+    };
+}
+export function toPendingConnectionRequest(request, otherUser, direction) {
+    return {
+        id: request.requestId,
         status: 'pending',
+        direction,
         createdAt: request.createdAt,
+        user: toCommunityUserProfile(otherUser),
+    };
+}
+export function toAcceptedConnection(friendUser, connectionId) {
+    return {
+        id: connectionId,
+        status: 'accepted',
+        user: toCommunityUserProfile(friendUser),
     };
 }
 export function toClientGroup(group) {

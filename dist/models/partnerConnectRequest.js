@@ -97,6 +97,15 @@ export async function getPartnerRequestBetween(userA, userB) {
         ],
     });
 }
+export async function listAcceptedPartnerRequestsForUser(userId) {
+    return getCollection()
+        .find({
+        status: 'accepted',
+        $or: [{ fromUserId: userId }, { toUserId: userId }],
+    })
+        .sort({ createdAt: -1 })
+        .toArray();
+}
 /** User IDs with a pending partner request involving this user (sent or received). */
 export async function listPendingPartnerUserIds(userId) {
     const rows = await getCollection()

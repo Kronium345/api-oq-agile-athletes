@@ -1,9 +1,9 @@
-import { acceptPartnerRequest, acceptPartnerRequestById, createPartnerRequest, declinePartnerRequestById, getPartnerRequestBetween, listPartnerRequestsForUser, } from "../models/partnerConnectRequest.js";
-import { friendshipExists } from "../models/userFriends.js";
+import { acceptPartnerRequest, acceptPartnerRequestById, createPartnerRequest, declinePartnerRequestById, getPartnerRequestBetween, listAcceptedPartnerRequestsForUser, listPartnerRequestsForUser, } from "../models/partnerConnectRequest.js";
+import { friendshipExists, getFriendUserIds } from "../models/userFriends.js";
 import { getUserById, getUsersByIds } from "../models/user.js";
 import { addFriendship } from "./stepsSocial.js";
 import { sendPartnerConnectAcceptedEmail, sendPartnerConnectRequestEmail, } from "../utils/partnerConnectionEmail.js";
-import { toConnectionRequestItem } from "../utils/communityResponse.js";
+import { toAcceptedConnection, toPendingConnectionRequest } from "../utils/communityResponse.js";
 function notifyPartnerRequestEmail(recipientId, senderId, requestId) {
     void (async () => {
         try {
@@ -92,10 +92,28 @@ export async function listPendingConnections(userId) {
     ];
     const users = await getUsersByIds(userIds);
     const userMap = new Map(users.map((u) => [u.userId, u]));
-    return {
-        incoming: incoming.map((r) => toConnectionRequestItem(r, userMap.get(r.fromUserId), 'incoming')),
-        outgoing: outgoing.map((r) => toConnectionRequestItem(r, userMap.get(r.toUserId), 'outgoing')),
-    };
+    const requests = [
+        ...incoming.map((r) => toPendingConnectionRequest(r, userMap.get(r.fromUserId), 'incoming')),
+        ...outgoing.map((r) => toPendingConnectionRequest(r, userMap.get(r.toUserId), 'outgoing')),
+    ].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    return { requests };
+}
+export async function listAcceptedConnections(userId) {
+    const friendIds = await getFriendUserIds(userId);
+    if (!friendIds.length) {
+        return { connections: [] };
+    }
+    const [users, acceptedRequests] = await Promise.all([
+        getUsersByIds(friendIds),
+        listAcceptedPartnerRequestsForUser(userId),
+    ]);
+    const connectionIdByFriend = new Map();
+    for (const request of acceptedRequests) {
+        const otherUserId = request.fromUserId === userId ? request.toUserId : request.fromUserId;
+        connectionIdByFriend.set(otherUserId, request.requestId);
+    }
+    const connections = users.map((user) => toAcceptedConnection(user, connectionIdByFriend.get(user.userId) ?? `conn_${user.userId}`));
+    return { connections };
 }
 export async function acceptConnection(requestId, userId) {
     const result = await acceptPartnerRequestById(requestId, userId);
