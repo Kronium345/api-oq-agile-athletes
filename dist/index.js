@@ -8,6 +8,7 @@ import { ensureTrainerDataSeeded } from "./services/trainerBootstrap.js";
 import { buildDeleteAccountPlayStoreHtml } from "./deleteAccountPage.js";
 import { verifyEmailTransport } from "./config/nodemailer.js";
 import { welcomeEmailLogoUrl } from "./utils/send-email.js";
+import { ensureUserIndexes } from "./models/user.js";
 import { ensureTrainerProfileIndexes } from "./models/trainerProfile.js";
 import { ensureFitnessGroupIndexes } from "./models/fitnessGroup.js";
 import { ensureTrainerReviewIndexes } from "./models/trainerReview.js";
@@ -89,6 +90,7 @@ app.use((req, res) => {
 async function startServer() {
     try {
         await connectToMongo();
+        await ensureUserIndexes();
         await ensureTrainerProfileIndexes();
         await ensureTrainerReviewIndexes();
         await ensureFitnessGroupIndexes();

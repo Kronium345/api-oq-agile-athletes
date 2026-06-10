@@ -18,6 +18,16 @@ export interface CreateUserParams {
   username?: string;
 }
 
+export interface CreateSocialUserParams {
+  email: string;
+  firstName?: string;
+  lastName?: string;
+  name?: string;
+  avatar?: string | null;
+  authProvider: 'google' | 'apple';
+  appleId?: string;
+}
+
 export type UserRole = 'member' | 'trainer';
 
 export interface User {
@@ -29,6 +39,7 @@ export interface User {
   username?: string | null;
   password?: string;
   authProvider?: string;
+  appleId?: string | null;
   gender?: string | null;
   experience?: string | null;
   avatar?: string | null;
@@ -59,6 +70,7 @@ export interface UserWithoutPassword {
   lastName?: string | null;
   username?: string | null;
   authProvider?: string;
+  appleId?: string | null;
   gender?: string | null;
   experience?: string | null;
   avatar?: string | null;
@@ -146,6 +158,64 @@ async function createUser({
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { password: _, ...userWithoutPassword } = user;
   return userWithoutPassword;
+}
+
+async function createSocialUser(params: CreateSocialUserParams): Promise<UserWithoutPassword> {
+  const usersCollection = getUsersCollection();
+  const userId = uuidv4();
+  const createdAt = new Date().toISOString();
+  const firstName = params.firstName?.trim() || null;
+  const lastName = params.lastName?.trim() || null;
+  const displayName = buildDisplayName({
+    name: params.name,
+    firstName: firstName || undefined,
+    lastName: lastName || undefined,
+    email: params.email,
+  });
+
+  const user: User = {
+    userId,
+    email: params.email.toLowerCase().trim(),
+    name: displayName,
+    firstName,
+    lastName,
+    username: null,
+    authProvider: params.authProvider,
+    appleId: params.appleId || null,
+    gender: null,
+    experience: null,
+    avatar: params.avatar ?? null,
+    weight: null,
+    unit: 'kg',
+    roles: ['member'],
+    savedTrainerIds: [],
+    shareStepsEnabled: true,
+    dailyStepGoal: Number(process.env.DEFAULT_DAILY_STEP_GOAL) || 10000,
+    emailSubscription: true,
+    emailNotifications: { ...DEFAULT_EMAIL_NOTIFICATIONS },
+    lastMotivationEmail: null,
+    createdAt,
+    updatedAt: createdAt,
+  };
+
+  await usersCollection.insertOne(user);
+  return user as UserWithoutPassword;
+}
+
+let userIndexesEnsured = false;
+
+export async function ensureUserIndexes(): Promise<void> {
+  if (userIndexesEnsured) return;
+  const col = getUsersCollection();
+  await col.createIndex({ email: 1 }, { unique: true });
+  await col.createIndex({ appleId: 1 }, { unique: true, sparse: true });
+  await col.createIndex({ username: 1 }, { unique: true, sparse: true });
+  userIndexesEnsured = true;
+}
+
+async function getUserByAppleId(appleId: string): Promise<User | null> {
+  const usersCollection = getUsersCollection();
+  return usersCollection.findOne({ appleId });
 }
 
 async function getUserByEmail(email: string): Promise<User | null> {
@@ -310,7 +380,9 @@ export {
   addTrainerRole,
   authenticateUser,
   authenticateUserByEmailOrUsername,
+  createSocialUser,
   createUser,
+  getUserByAppleId,
   getUserByEmail,
   getUserByUsername,
   getUserByEmailOrUsername,

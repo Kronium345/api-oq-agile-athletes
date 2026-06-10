@@ -11,6 +11,7 @@ import { ensureTrainerDataSeeded } from './services/trainerBootstrap.ts';
 import { buildDeleteAccountPlayStoreHtml } from './deleteAccountPage.ts';
 import { verifyEmailTransport } from './config/nodemailer.ts';
 import { welcomeEmailLogoUrl } from './utils/send-email.ts';
+import { ensureUserIndexes } from './models/user.ts';
 import { ensureTrainerProfileIndexes } from './models/trainerProfile.ts';
 import { ensureFitnessGroupIndexes } from './models/fitnessGroup.ts';
 import { ensureTrainerReviewIndexes } from './models/trainerReview.ts';
@@ -104,6 +105,7 @@ app.use((req, res) => {
 async function startServer() {
   try {
     await connectToMongo();
+    await ensureUserIndexes();
     await ensureTrainerProfileIndexes();
     await ensureTrainerReviewIndexes();
     await ensureFitnessGroupIndexes();

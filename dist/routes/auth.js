@@ -9,6 +9,9 @@ import { dispatchWelcomeEmail } from "../utils/dispatchWelcomeEmail.js";
 import { signAuthToken } from "../utils/jwt.js";
 import { toClientUser } from "../utils/userResponse.js";
 import { getDisplayName } from "../utils/userDisplay.js";
+import { verifyGoogleIdToken } from "../services/googleAuth.js";
+import { verifyAppleIdentityToken } from "../services/appleAuth.js";
+import { buildSocialAuthResponse, loginOrRegisterApple, loginOrRegisterGoogle, } from "../services/socialAuth.js";
 const router = express.Router();
 function issueToken(userId, email) {
     return signAuthToken(userId, email);
@@ -153,6 +156,49 @@ router.post('/signin', async (req, res) => {
             success: false,
             message: 'Failed to sign in',
             error: err.message,
+        });
+    }
+});
+// --- Google & Apple Sign-In (native OAuth → server-verified tokens) ---
+router.post('/google', async (req, res) => {
+    try {
+        const { token } = req.body;
+        if (!token?.trim()) {
+            return res.status(400).json({ success: false, message: 'No token provided' });
+        }
+        const profile = await verifyGoogleIdToken(token);
+        const { user, isNewUser } = await loginOrRegisterGoogle(profile);
+        const payload = buildSocialAuthResponse(user, isNewUser);
+        return res.status(isNewUser ? 201 : 200).json(payload);
+    }
+    catch (error) {
+        const err = error;
+        console.error('Google auth error:', err.message);
+        return res.status(401).json({
+            success: false,
+            message: 'Google authentication failed',
+            error: process.env.NODE_ENV === 'development' ? err.message : undefined,
+        });
+    }
+});
+router.post('/apple', async (req, res) => {
+    try {
+        const { token } = req.body;
+        if (!token?.trim()) {
+            return res.status(400).json({ success: false, message: 'No token provided' });
+        }
+        const profile = await verifyAppleIdentityToken(token);
+        const { user, isNewUser } = await loginOrRegisterApple(profile);
+        const payload = buildSocialAuthResponse(user, isNewUser);
+        return res.status(isNewUser ? 201 : 200).json(payload);
+    }
+    catch (error) {
+        const err = error;
+        console.error('Apple auth error:', err.message);
+        return res.status(401).json({
+            success: false,
+            message: 'Apple authentication failed',
+            error: process.env.NODE_ENV === 'development' ? err.message : undefined,
         });
     }
 });

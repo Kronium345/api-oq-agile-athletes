@@ -51,6 +51,59 @@ async function createUser({ name, email, password, firstName, lastName, username
     const { password: _, ...userWithoutPassword } = user;
     return userWithoutPassword;
 }
+async function createSocialUser(params) {
+    const usersCollection = getUsersCollection();
+    const userId = uuidv4();
+    const createdAt = new Date().toISOString();
+    const firstName = params.firstName?.trim() || null;
+    const lastName = params.lastName?.trim() || null;
+    const displayName = buildDisplayName({
+        name: params.name,
+        firstName: firstName || undefined,
+        lastName: lastName || undefined,
+        email: params.email,
+    });
+    const user = {
+        userId,
+        email: params.email.toLowerCase().trim(),
+        name: displayName,
+        firstName,
+        lastName,
+        username: null,
+        authProvider: params.authProvider,
+        appleId: params.appleId || null,
+        gender: null,
+        experience: null,
+        avatar: params.avatar ?? null,
+        weight: null,
+        unit: 'kg',
+        roles: ['member'],
+        savedTrainerIds: [],
+        shareStepsEnabled: true,
+        dailyStepGoal: Number(process.env.DEFAULT_DAILY_STEP_GOAL) || 10000,
+        emailSubscription: true,
+        emailNotifications: { ...DEFAULT_EMAIL_NOTIFICATIONS },
+        lastMotivationEmail: null,
+        createdAt,
+        updatedAt: createdAt,
+    };
+    await usersCollection.insertOne(user);
+    return user;
+}
+let userIndexesEnsured = false;
+export async function ensureUserIndexes() {
+    if (userIndexesEnsured)
+        return;
+    const col = getUsersCollection();
+    await col.createIndex({ email: 1 }, { unique: true });
+    await col.createIndex({ appleId: 1 }, { unique: true, sparse: true });
+    await col.createIndex({ username: 1 }, { unique: true, sparse: true });
+    userIndexesEnsured = true;
+}
+async function getUserByAppleId(appleId) {
+    const usersCollection = getUsersCollection();
+    return usersCollection.findOne({ appleId });
+}
 async function getUserByEmail(email) {
     const usersCollection = getUsersCollection();
     return usersCollection.findOne({ email: email.toLowerCase().trim() });
@@ -167,4 +220,4 @@ async function addTrainerRole(userId) {
         $set: { updatedAt: new Date().toISOString() },
     });
 }
-export { addSavedTrainer, addTrainerRole, authenticateUser, authenticateUserByEmailOrUsername, createUser, getUserByEmail, getUserByUsername, getUserByEmailOrUsername, getUserById, getUsersByIds, listUserSuggestions, listUsersWithStepSharing, removeSavedTrainer, updateUser, };
+export { addSavedTrainer, addTrainerRole, authenticateUser, authenticateUserByEmailOrUsername, createSocialUser, createUser, getUserByAppleId, getUserByEmail, getUserByUsername, getUserByEmailOrUsername, getUserById, getUsersByIds, listUserSuggestions, listUsersWithStepSharing, removeSavedTrainer, updateUser, };
