@@ -11,9 +11,15 @@ export interface FitnessGroup {
   description: string;
   gymName?: string;
   postcode?: string;
+  city?: string;
+  category?: string;
   location?: GeoPoint;
   scheduleSummary?: string;
   memberCount: number;
+  verified?: boolean;
+  source?: string;
+  lastVerified?: string;
+  sourceUrl?: string;
   createdBy?: string;
   createdAt: string;
 }
@@ -61,7 +67,7 @@ export async function listFitnessGroups(query: {
     return results as FitnessGroup[];
   }
 
-  return col.find({}).sort({ memberCount: -1, createdAt: -1 }).limit(limit).toArray();
+  return col.find({}).sort({ verified: -1, name: 1, createdAt: -1 }).limit(limit).toArray();
 }
 
 export async function getFitnessGroupById(groupId: string): Promise<FitnessGroup | null> {

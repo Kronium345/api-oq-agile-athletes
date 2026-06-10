@@ -33,7 +33,7 @@ export async function listFitnessGroups(query) {
             .toArray();
         return results;
     }
-    return col.find({}).sort({ memberCount: -1, createdAt: -1 }).limit(limit).toArray();
+    return col.find({}).sort({ verified: -1, name: 1, createdAt: -1 }).limit(limit).toArray();
 }
 export async function getFitnessGroupById(groupId) {
     return getCollection().findOne({ groupId });

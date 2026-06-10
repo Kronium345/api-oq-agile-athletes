@@ -5,6 +5,7 @@ export const DEFAULT_EMAIL_NOTIFICATIONS = {
     motivation: true,
     runReminders: true,
     workoutDiscussions: true,
+    connectionRequests: true,
 };
 export function resolveEmailNotifications(user) {
     if (user.emailSubscription === false) {
@@ -15,6 +16,7 @@ export function resolveEmailNotifications(user) {
             motivation: false,
             runReminders: false,
             workoutDiscussions: false,
+            connectionRequests: user.emailNotifications?.connectionRequests !== false,
         };
     }
     return {
@@ -33,8 +35,15 @@ export function prefsFromMobileSettings(settings) {
             leaderboardAlerts: settings.leaderboardAlerts !== false,
             runReminders: settings.runReminders !== false,
             workoutDiscussions: settings.workoutDiscussions !== false,
+            connectionRequests: settings.connectionRequests !== false,
             weeklyProgress: subscribed,
             motivation: subscribed,
         },
     };
+}
+/** Connection request emails are transactional social — not gated by emailSubscription. */
+export function shouldSendConnectionRequestEmail(user) {
+    if (user.emailNotifications?.connectionRequests === false)
+        return false;
+    return true;
 }

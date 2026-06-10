@@ -5,6 +5,8 @@ export interface EmailNotificationPrefs {
   motivation: boolean;
   runReminders: boolean;
   workoutDiscussions: boolean;
+  /** Training partner / friend connection requests (transactional social). */
+  connectionRequests: boolean;
 }
 
 export const DEFAULT_EMAIL_NOTIFICATIONS: EmailNotificationPrefs = {
@@ -14,6 +16,7 @@ export const DEFAULT_EMAIL_NOTIFICATIONS: EmailNotificationPrefs = {
   motivation: true,
   runReminders: true,
   workoutDiscussions: true,
+  connectionRequests: true,
 };
 
 export function resolveEmailNotifications(user: {
@@ -28,6 +31,7 @@ export function resolveEmailNotifications(user: {
       motivation: false,
       runReminders: false,
       workoutDiscussions: false,
+      connectionRequests: user.emailNotifications?.connectionRequests !== false,
     };
   }
 
@@ -44,6 +48,7 @@ export function prefsFromMobileSettings(settings: {
   leaderboardAlerts?: boolean;
   runReminders?: boolean;
   workoutDiscussions?: boolean;
+  connectionRequests?: boolean;
 }): {
   emailSubscription: boolean;
   emailNotifications: EmailNotificationPrefs;
@@ -57,8 +62,18 @@ export function prefsFromMobileSettings(settings: {
       leaderboardAlerts: settings.leaderboardAlerts !== false,
       runReminders: settings.runReminders !== false,
       workoutDiscussions: settings.workoutDiscussions !== false,
+      connectionRequests: settings.connectionRequests !== false,
       weeklyProgress: subscribed,
       motivation: subscribed,
     },
   };
+}
+
+/** Connection request emails are transactional social — not gated by emailSubscription. */
+export function shouldSendConnectionRequestEmail(user: {
+  emailSubscription?: boolean;
+  emailNotifications?: Partial<EmailNotificationPrefs>;
+}): boolean {
+  if (user.emailNotifications?.connectionRequests === false) return false;
+  return true;
 }

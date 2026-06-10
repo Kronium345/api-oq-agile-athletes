@@ -4,7 +4,7 @@ import express from 'express';
 import { connectToMongo } from "./config/mongoClient.js";
 import { checkFoodVisionReady, getFoodVisionProvider, } from "./services/foodVisionClient.js";
 import { ensureQuizDataSeeded, getQuizBootstrapStatus } from "./services/quizBootstrap.js";
-import { ensureTrainerDataSeeded } from "./services/trainerBootstrap.js";
+// import { ensureTrainerDataSeeded } from './services/trainerBootstrap.ts';
 import { buildDeleteAccountPlayStoreHtml } from "./deleteAccountPage.js";
 import { verifyEmailTransport } from "./config/nodemailer.js";
 import { welcomeEmailLogoUrl } from "./utils/send-email.js";
@@ -111,14 +111,15 @@ async function startServer() {
             readyForQuizUi: quizStatus.readyForQuizUi,
             readyForPredict: quizStatus.readyForPredict,
         });
-        const trainerSeed = await ensureTrainerDataSeeded();
-        console.log('[trainers] PT Network seed:', {
-            enabled: trainerSeed.enabled,
-            trainersSeeded: trainerSeed.trainersSeeded,
-            publishedTrainerCount: trainerSeed.trainerCount,
-            groupsSeeded: trainerSeed.groupsSeeded,
-            groupCount: trainerSeed.groupCount,
-        });
+        // PT mock seed disabled — re-enable when frontend uses live trainer data
+        // const trainerSeed = await ensureTrainerDataSeeded();
+        // console.log('[trainers] PT Network seed:', {
+        //   enabled: trainerSeed.enabled,
+        //   trainersSeeded: trainerSeed.trainersSeeded,
+        //   publishedTrainerCount: trainerSeed.trainerCount,
+        //   groupsSeeded: trainerSeed.groupsSeeded,
+        //   groupCount: trainerSeed.groupCount,
+        // });
         const foodVisionProvider = getFoodVisionProvider();
         if (foodVisionProvider === 'http') {
             const ready = await checkFoodVisionReady();
