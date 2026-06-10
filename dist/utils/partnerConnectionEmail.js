@@ -1,6 +1,6 @@
 import transporter, { accountEmail, isEmailConfigured } from "../config/nodemailer.js";
 import { shouldSendConnectionRequestEmail } from "./emailNotifications.js";
-import { welcomeAppDisplayName } from "./send-email.js";
+import { buildEmailBannerRow, welcomeAppDisplayName, welcomeEmailLogoUrl } from "./send-email.js";
 import { getDisplayName } from "./userDisplay.js";
 function frontendBase() {
     let url = (process.env.FRONTEND_URL || 'https://agile-athletes.expo.app').trim().replace(/\/$/, '');
@@ -29,10 +29,13 @@ function escapeHtml(value) {
 }
 function buildConnectionEmailHtml(params) {
     const appName = welcomeAppDisplayName();
-    const c = { primary: '#FF6F00', primaryDark: '#E65100', muted: '#555555' };
+    const c = { primary: '#FF6F00', primaryDark: '#E65100', muted: '#555555', pageBg: '#FFF8F0' };
+    const logoUrl = welcomeEmailLogoUrl();
+    const logoRow = logoUrl ? buildEmailBannerRow(logoUrl, c.pageBg, appName) : '';
     return `
-    <div style="font-family: 'Segoe UI', Tahoma, sans-serif; line-height: 1.55; color: #333; max-width: 600px; margin: 0 auto; background-color: #FFF8F0;">
+    <div style="font-family: 'Segoe UI', Tahoma, sans-serif; line-height: 1.55; color: #333; max-width: 600px; margin: 0 auto; background-color: ${c.pageBg};">
       <table cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color: #ffffff; border-radius: 15px; overflow: hidden; box-shadow: 0 6px 12px rgba(230, 81, 0, 0.12);">
+        ${logoRow}
         <tr>
           <td style="background: linear-gradient(135deg, ${c.primary} 0%, ${c.primaryDark} 100%); text-align: center; padding: 26px;">
             <h1 style="color: white; font-size: 24px; margin: 0;">${escapeHtml(appName)}</h1>

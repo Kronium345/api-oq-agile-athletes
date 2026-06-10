@@ -95,7 +95,8 @@ export function welcomeEmailLogoUrl() {
 function escapeHtmlAttr(value) {
     return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
 }
-function buildWelcomeLogoRow(logoUrl, pageBg, alt) {
+/** Shared email header banner (welcome + connection emails). */
+export function buildEmailBannerRow(logoUrl, pageBg, alt) {
     const src = escapeHtmlAttr(logoUrl);
     const safeAlt = escapeHtmlAttr(alt);
     return `
@@ -111,7 +112,7 @@ function buildWelcomeEmailHtml(userName, appLink) {
     const safeName = userName.replace(/[<>&]/g, '');
     const c = WELCOME_COLORS;
     const logoUrl = welcomeEmailLogoUrl();
-    const logoRow = logoUrl ? buildWelcomeLogoRow(logoUrl, c.pageBg, appName) : '';
+    const logoRow = logoUrl ? buildEmailBannerRow(logoUrl, c.pageBg, appName) : '';
     return `
     <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.55; color: ${c.text}; max-width: 600px; margin: 0 auto; background-color: ${c.pageBg};">
       <table cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color: #ffffff; border-radius: 15px; overflow: hidden; box-shadow: 0 6px 12px rgba(230, 81, 0, 0.12);">
