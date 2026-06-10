@@ -28,7 +28,7 @@ async function createUser({ name, email, password, firstName, lastName, username
         name: displayName,
         firstName: firstName?.trim() || null,
         lastName: lastName?.trim() || null,
-        username: username?.trim() || null,
+        ...(username?.trim() ? { username: username.trim() } : {}),
         password: hashedPassword,
         authProvider: 'local',
         gender: null,
@@ -69,9 +69,8 @@ async function createSocialUser(params) {
         name: displayName,
         firstName,
         lastName,
-        username: null,
         authProvider: params.authProvider,
-        appleId: params.appleId || null,
+        ...(params.appleId ? { appleId: params.appleId } : {}),
         gender: null,
         experience: null,
         avatar: params.avatar ?? null,
@@ -95,9 +94,28 @@ export async function ensureUserIndexes() {
     if (userIndexesEnsured)
         return;
     const col = getUsersCollection();
+    // Drop legacy indexes that treated explicit null as a value (many users without username/appleId).
+    for (const legacy of ['username_1', 'appleId_1']) {
+        try {
+            await col.dropIndex(legacy);
+        }
+        catch {
+            // Index may not exist yet.
+        }
+    }
     await col.createIndex({ email: 1 }, { unique: true });
-    await col.createIndex({ appleId: 1 }, { unique: true, sparse: true });
-    await col.createIndex({ username: 1 }, { unique: true, sparse: true });
+    await col.createIndex({ appleId: 1 }, {
+        unique: true,
+        name: 'appleId_unique_set',
+        partialFilterExpression: { appleId: { $exists: true, $type: 'string' } },
+    });
+    await col.createIndex({ username: 1 }, {
+        unique: true,
+        name: 'username_unique_set',
+        partialFilterExpression: {
+            username: { $exists: true, $type: 'string', $gt: '' },
+        },
+    });
     userIndexesEnsured = true;
 }
 async function getUserByAppleId(appleId) {
