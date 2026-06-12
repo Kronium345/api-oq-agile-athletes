@@ -1,3 +1,4 @@
+import { listPendingPartnerUserIds } from '../models/partnerConnectRequest.ts';
 import { getStepHistoryForUsers } from '../models/stepHistory.ts';
 import {
   addFriend,
@@ -114,7 +115,8 @@ function statsForViewer(
 
 export async function getSuggestions(userId: string, limit: number) {
   const friendIds = await getFriendUserIds(userId);
-  const exclude = [userId, ...friendIds];
+  const pendingIds = await listPendingPartnerUserIds(userId);
+  const exclude = [...new Set([userId, ...friendIds, ...pendingIds])];
   const users = await listUserSuggestions(exclude, limit);
   return users.map((u) => toPublicUserCard(u));
 }

@@ -113,7 +113,7 @@ router.post('/friends/:friendUserId', authenticate, async (req: AuthenticatedReq
     if (!result.ok) {
       return res.status(result.status).json({ success: false, message: result.message });
     }
-    return res.status(result.status).json({ success: true, friendUserId: result.friendUserId });
+    return res.status(result.status).json({ success: true, message: 'Friend added' });
   } catch (error: unknown) {
     const err = error as Error;
     console.error('Add friend error:', err);

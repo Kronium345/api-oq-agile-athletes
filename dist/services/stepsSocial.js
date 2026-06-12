@@ -1,3 +1,4 @@
+import { listPendingPartnerUserIds } from "../models/partnerConnectRequest.js";
 import { getStepHistoryForUsers } from "../models/stepHistory.js";
 import { addFriend, friendshipExists, getFriendUserIds, removeFriend, } from "../models/userFriends.js";
 import { getUserById, getUsersByIds, listUserSuggestions, listUsersWithStepSharing, updateUser, } from "../models/user.js";
@@ -71,7 +72,8 @@ function statsForViewer(targetUser, viewerUserId, stats) {
 }
 export async function getSuggestions(userId, limit) {
     const friendIds = await getFriendUserIds(userId);
-    const exclude = [userId, ...friendIds];
+    const pendingIds = await listPendingPartnerUserIds(userId);
+    const exclude = [...new Set([userId, ...friendIds, ...pendingIds])];
     const users = await listUserSuggestions(exclude, limit);
     return users.map((u) => toPublicUserCard(u));
 }

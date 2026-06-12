@@ -79,8 +79,8 @@ router.post(
       return res.json({
         success: true,
         message: result.message,
-        status: result.connectionStatus,
-        requestId: result.requestId,
+        ...(result.requestId ? { requestId: result.requestId } : {}),
+        ...(result.connectionStatus !== 'pending' ? { status: result.connectionStatus } : {}),
       });
     } catch (error: unknown) {
       console.error('POST /community/partners/:userId/connect error:', error);

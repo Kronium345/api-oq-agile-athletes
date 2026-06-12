@@ -84,7 +84,7 @@ router.post('/friends/:friendUserId', authenticate, async (req, res) => {
         if (!result.ok) {
             return res.status(result.status).json({ success: false, message: result.message });
         }
-        return res.status(result.status).json({ success: true, friendUserId: result.friendUserId });
+        return res.status(result.status).json({ success: true, message: 'Friend added' });
     }
     catch (error) {
         const err = error;

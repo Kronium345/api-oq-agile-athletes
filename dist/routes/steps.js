@@ -1,9 +1,19 @@
 import express from 'express';
 import { authenticate } from "../middleware/auth.js";
-import { getStepHistory, getStepsByDate, getTotalSteps, recordSteps, updateSteps, } from "../models/stepHistory.js";
+import { ensureStepHistoryIndexes, getStepHistory, getStepsByDate, getTotalSteps, isValidStepDate, recordSteps, } from "../models/stepHistory.js";
 import { getLeaderboard } from "../services/stepsSocial.js";
+import { toDailyStepRow } from "../utils/stepResponse.js";
 import { routeParam } from "../utils/routeParams.js";
 const router = express.Router();
+router.use(async (_req, _res, next) => {
+    try {
+        await ensureStepHistoryIndexes();
+        next();
+    }
+    catch (err) {
+        next(err);
+    }
+});
 function parseLeaderboardPeriod(value) {
     if (value === 'streaks' || value === 'today' || value === 'week')
         return value;
@@ -23,7 +33,7 @@ router.get('/leaderboard', authenticate, async (req, res) => {
             ? Math.min(Number(limitRaw), 100)
             : 12;
         const { entries } = await getLeaderboard(req.userId, period, scope, limit);
-        return res.json({ success: true, period, entries });
+        return res.json({ success: true, period, scope, entries });
     }
     catch (error) {
         const err = error;
@@ -41,55 +51,56 @@ router.post('/', authenticate, async (req, res) => {
                 message: 'Date and stepCount are required',
             });
         }
-        const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-        if (!dateRegex.test(date)) {
+        if (!isValidStepDate(date)) {
             return res.status(400).json({
                 success: false,
                 message: 'Date must be in YYYY-MM-DD format',
             });
         }
         const result = await recordSteps(userId, date, stepCount);
+        const count = result.stepCount ?? 0;
         res.json({
             success: true,
             message: 'Steps recorded successfully',
-            data: result,
+            stepCount: count,
+            data: { date, stepCount: count },
         });
     }
     catch (error) {
-        console.error('Record steps error:', error);
+        const err = error;
+        console.error('Record steps error:', err);
         res.status(500).json({
             success: false,
             message: 'Failed to record steps',
-            error: error.message,
+            error: err.message,
         });
     }
 });
-/**
- * Get steps for a specific date
- */
 router.get('/date/:date', authenticate, async (req, res) => {
     try {
         const date = routeParam(req.params.date);
         const userId = req.userId;
+        if (!isValidStepDate(date)) {
+            return res.status(400).json({ success: false, message: 'Date must be in YYYY-MM-DD format' });
+        }
         const steps = await getStepsByDate(userId, date);
         const stepCount = steps?.stepCount ?? 0;
         res.json({
             success: true,
             stepCount,
+            data: { stepCount, date },
         });
     }
     catch (error) {
-        console.error('Get steps by date error:', error);
+        const err = error;
+        console.error('Get steps by date error:', err);
         res.status(500).json({
             success: false,
             message: 'Failed to get steps',
-            error: error.message,
+            error: err.message,
         });
     }
 });
-/**
- * Get step history within a date range
- */
 router.get('/history', authenticate, async (req, res) => {
     try {
         const { startDate, endDate } = req.query;
@@ -100,70 +111,90 @@ router.get('/history', authenticate, async (req, res) => {
                 message: 'startDate and endDate query parameters are required',
             });
         }
-        const history = await getStepHistory(userId, startDate, endDate);
+        if (!isValidStepDate(startDate) || !isValidStepDate(endDate)) {
+            return res.status(400).json({
+                success: false,
+                message: 'startDate and endDate must be YYYY-MM-DD',
+            });
+        }
+        const rows = await getStepHistory(userId, startDate, endDate);
+        const history = rows.map(toDailyStepRow).sort((a, b) => a.date.localeCompare(b.date));
         res.json({
             success: true,
+            history,
             data: history,
         });
     }
     catch (error) {
-        console.error('Get step history error:', error);
+        const err = error;
+        console.error('Get step history error:', err);
         res.status(500).json({
             success: false,
             message: 'Failed to get step history',
-            error: error.message,
+            error: err.message,
         });
     }
 });
-/**
- * Get total steps (all time or within date range)
- */
 router.get('/total', authenticate, async (req, res) => {
     try {
         const { startDate, endDate } = req.query;
         const userId = req.userId;
-        const total = await getTotalSteps(userId, startDate || null, endDate || null);
+        if (startDate && !isValidStepDate(startDate)) {
+            return res.status(400).json({ success: false, message: 'startDate must be YYYY-MM-DD' });
+        }
+        if (endDate && !isValidStepDate(endDate)) {
+            return res.status(400).json({ success: false, message: 'endDate must be YYYY-MM-DD' });
+        }
+        const totalSteps = await getTotalSteps(userId, startDate || null, endDate || null);
         res.json({
             success: true,
-            totalSteps: total,
+            totalSteps,
+            data: { totalSteps },
         });
     }
     catch (error) {
-        console.error('Get total steps error:', error);
+        const err = error;
+        console.error('Get total steps error:', err);
         res.status(500).json({
             success: false,
             message: 'Failed to get total steps',
-            error: error.message,
+            error: err.message,
         });
     }
 });
-/**
- * Update steps for a specific date
- */
+/** Upsert daily step count for the authenticated user (local calendar date). */
 router.put('/:date', authenticate, async (req, res) => {
     try {
         const date = routeParam(req.params.date);
         const { stepCount } = req.body;
         const userId = req.userId;
-        if (stepCount === undefined) {
+        if (!isValidStepDate(date)) {
             return res.status(400).json({
                 success: false,
-                message: 'stepCount is required',
+                message: 'Date must be in YYYY-MM-DD format',
             });
         }
-        const result = await updateSteps(userId, date, stepCount);
+        if (stepCount === undefined || Number.isNaN(Number(stepCount))) {
+            return res.status(400).json({
+                success: false,
+                message: 'stepCount (number) is required',
+            });
+        }
+        const result = await recordSteps(userId, date, Number(stepCount));
+        const count = result.stepCount ?? 0;
         res.json({
             success: true,
-            message: 'Steps updated successfully',
-            data: result,
+            stepCount: count,
+            data: { date, stepCount: count },
         });
     }
     catch (error) {
-        console.error('Update steps error:', error);
+        const err = error;
+        console.error('Update steps error:', err);
         res.status(500).json({
             success: false,
             message: 'Failed to update steps',
-            error: error.message,
+            error: err.message,
         });
     }
 });

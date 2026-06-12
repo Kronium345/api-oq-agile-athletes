@@ -18,6 +18,23 @@ function getStepHistoryCollection(): Collection<StepHistoryItem> {
   return db.collection<StepHistoryItem>(STEP_HISTORY_TABLE);
 }
 
+let stepHistoryIndexesEnsured = false;
+
+/** One row per user per calendar date — prevents duplicate step rows on upsert races. */
+export async function ensureStepHistoryIndexes(): Promise<void> {
+  if (stepHistoryIndexesEnsured) return;
+  const col = getStepHistoryCollection();
+  await col.createIndex({ userId: 1, date: 1 }, { unique: true });
+  await col.createIndex({ userId: 1, date: -1 });
+  stepHistoryIndexesEnsured = true;
+}
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+export function isValidStepDate(date: string): boolean {
+  return DATE_RE.test(date);
+}
+
 async function recordSteps(userId: string, date: string, stepCount: number | string): Promise<StepHistoryItem> {
   const collection = getStepHistoryCollection();
   const now = new Date().toISOString();
@@ -99,18 +116,8 @@ async function markGoalAchieved(userId: string, date: string): Promise<void> {
   );
 }
 
-async function updateSteps(userId: string, date: string, stepCount: number | string): Promise<StepHistoryItem | null> {
-  const collection = getStepHistoryCollection();
-  await collection.updateOne(
-    { userId, date },
-    {
-      $set: { stepCount: Number(stepCount), updatedAt: new Date().toISOString() },
-      $setOnInsert: { createdAt: new Date().toISOString() },
-    },
-    { upsert: true }
-  );
-
-  return getStepsByDate(userId, date);
+async function updateSteps(userId: string, date: string, stepCount: number | string): Promise<StepHistoryItem> {
+  return recordSteps(userId, date, stepCount);
 }
 
 export {

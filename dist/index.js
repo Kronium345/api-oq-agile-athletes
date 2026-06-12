@@ -11,6 +11,7 @@ import { welcomeEmailLogoUrl } from "./utils/send-email.js";
 import { ensureUserIndexes } from "./models/user.js";
 import { ensureTrainerProfileIndexes } from "./models/trainerProfile.js";
 import { ensureFitnessGroupIndexes } from "./models/fitnessGroup.js";
+import { ensureStepHistoryIndexes } from "./models/stepHistory.js";
 import { ensureTrainerReviewIndexes } from "./models/trainerReview.js";
 import analyzeFoodRoutes from "./routes/analyzeFood.js";
 import aiChatRoutes from "./routes/aiChat.js";
@@ -94,6 +95,7 @@ async function startServer() {
         await ensureTrainerProfileIndexes();
         await ensureTrainerReviewIndexes();
         await ensureFitnessGroupIndexes();
+        await ensureStepHistoryIndexes();
         verifyEmailTransport();
         const welcomeLogo = welcomeEmailLogoUrl();
         if (welcomeLogo) {

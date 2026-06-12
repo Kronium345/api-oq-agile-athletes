@@ -93,7 +93,7 @@ export async function sendPartnerConnect(fromUserId: string, toUserId: string): 
     return {
       ok: true,
       connectionStatus: 'pending',
-      message: 'Connect request sent',
+      message: 'Request sent',
       requestId: existing.requestId,
     };
   }
@@ -104,7 +104,7 @@ export async function sendPartnerConnect(fromUserId: string, toUserId: string): 
   return {
     ok: true,
     connectionStatus: 'pending',
-    message: 'Connect request sent',
+    message: 'Request sent',
     requestId: created.requestId,
   };
 }

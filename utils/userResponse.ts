@@ -1,4 +1,5 @@
 import type { UserWithoutPassword } from '../models/user.ts';
+import { isShareStepsEnabled } from './userDisplay.ts';
 
 export function toClientUser(user: UserWithoutPassword) {
   const displayName =
@@ -10,6 +11,7 @@ export function toClientUser(user: UserWithoutPassword) {
     ...user,
     _id: user.userId,
     name: displayName,
+    shareStepsEnabled: isShareStepsEnabled(user),
   };
 }
 
