@@ -208,6 +208,7 @@ function buildWelcomeEmailHtml(userName: string, appLink: string): string {
                 <li><strong>Workout history</strong> — view past logged workouts</li>
                 <li><strong>Mind Center</strong> — UK-focused mental wellness (articles, resources, assistant)</li>
                 <li><strong>AI Coach</strong> — fitness chatbot with saved conversations</li>
+                <li><strong>AI Form Coach</strong> — personal form check for that perfect result</li>
                 <li><strong>Assessment</strong> — anger/anxiety quiz and personalized results</li>
                 <li><strong>Food Tracker</strong> — logging, scanning, and insights <em>(coming soon)</em></li>
               </ul>
