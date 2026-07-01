@@ -10,7 +10,7 @@
     "build": "tsc",
     "seed:trainers": "node --import tsx scripts/seedTrainers.ts",
     "seed:groups": "node --import tsx scripts/seedGroups.ts",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --import tsx --test tests/**/*.test.ts"
   },
   "keywords": [],
   "author": "",

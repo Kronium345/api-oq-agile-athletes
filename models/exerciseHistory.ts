@@ -105,9 +105,18 @@ async function recordExercise(userId: string, exerciseData: ExerciseData): Promi
  * Get exercise history for a user within a date range
  */
 async function getExerciseHistory(userId: string, startDate: string, endDate: string): Promise<ExerciseHistoryItem[]> {
+  return getExerciseHistoryByCalendarDates(userId, startDate, endDate);
+}
+
+/** Inclusive calendar date range (YYYY-MM-DD), full UTC days. */
+async function getExerciseHistoryByCalendarDates(
+  userId: string,
+  startDate: string,
+  endDate: string
+): Promise<ExerciseHistoryItem[]> {
   const collection = getExerciseHistoryCollection();
-  const start = new Date(startDate).toISOString();
-  const end = new Date(endDate).toISOString();
+  const start = `${startDate}T00:00:00.000Z`;
+  const end = `${endDate}T23:59:59.999Z`;
   return collection
     .find({ userId, timeStamp: { $gte: start, $lte: end } })
     .sort({ timeStamp: -1 })
@@ -180,6 +189,7 @@ export {
   getAllExercises,
   getExerciseById,
   getExerciseHistory,
+  getExerciseHistoryByCalendarDates,
   getTotalCaloriesBurned,
   getTotalExerciseDuration,
   recordExercise,

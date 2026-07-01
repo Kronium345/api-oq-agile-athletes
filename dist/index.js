@@ -12,6 +12,7 @@ import { ensureUserIndexes } from "./models/user.js";
 import { ensureTrainerProfileIndexes } from "./models/trainerProfile.js";
 import { ensureFitnessGroupIndexes } from "./models/fitnessGroup.js";
 import { ensureStepHistoryIndexes } from "./models/stepHistory.js";
+import { ensurePerformanceCheckinIndexes } from "./models/performanceCheckin.js";
 import { ensureTrainerReviewIndexes } from "./models/trainerReview.js";
 import analyzeFoodRoutes from "./routes/analyzeFood.js";
 import aiChatRoutes from "./routes/aiChat.js";
@@ -34,6 +35,7 @@ import stripeWebhookRoutes from "./routes/stripeWebhook.js";
 import trainersRoutes from "./routes/trainers.js";
 import workflowRoutes from "./routes/workflow.js";
 import formCoachRoutes from "./routes/formCoach.js";
+import performanceRoutes from "./routes/performance.js";
 import { checkFormCoachReady } from "./services/formCoachClient.js";
 import { logQstashStartup } from "./utils/upstashEnv.js";
 const app = express();
@@ -73,6 +75,7 @@ app.use('/activity', activityRoutes);
 app.use('/trainers', trainersRoutes);
 app.use('/bookings', bookingsRoutes);
 app.use('/community', communityRoutes);
+app.use('/performance', performanceRoutes);
 app.use('/uploads', express.static('uploads'));
 app.use((err, req, res, next) => {
     console.error('Error:', err);
@@ -96,6 +99,7 @@ async function startServer() {
         await ensureTrainerReviewIndexes();
         await ensureFitnessGroupIndexes();
         await ensureStepHistoryIndexes();
+        await ensurePerformanceCheckinIndexes();
         verifyEmailTransport();
         const welcomeLogo = welcomeEmailLogoUrl();
         if (welcomeLogo) {

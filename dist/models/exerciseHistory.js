@@ -58,9 +58,13 @@ async function recordExercise(userId, exerciseData) {
  * Get exercise history for a user within a date range
  */
 async function getExerciseHistory(userId, startDate, endDate) {
+    return getExerciseHistoryByCalendarDates(userId, startDate, endDate);
+}
+/** Inclusive calendar date range (YYYY-MM-DD), full UTC days. */
+async function getExerciseHistoryByCalendarDates(userId, startDate, endDate) {
     const collection = getExerciseHistoryCollection();
-    const start = new Date(startDate).toISOString();
-    const end = new Date(endDate).toISOString();
+    const start = `${startDate}T00:00:00.000Z`;
+    const end = `${endDate}T23:59:59.999Z`;
     return collection
         .find({ userId, timeStamp: { $gte: start, $lte: end } })
         .sort({ timeStamp: -1 })
@@ -119,4 +123,4 @@ async function getTotalCaloriesBurned(userId, startDate = null, endDate = null) 
     }
     return items.reduce((total, item) => total + (item.calories || 0), 0);
 }
-export { getAllExercises, getExerciseById, getExerciseHistory, getTotalCaloriesBurned, getTotalExerciseDuration, recordExercise };
+export { getAllExercises, getExerciseById, getExerciseHistory, getExerciseHistoryByCalendarDates, getTotalCaloriesBurned, getTotalExerciseDuration, recordExercise };
