@@ -1,6 +1,7 @@
 import axios from 'axios';
 import express from 'express';
 import { analyzeExerciseImage } from "../services/exerciseRecognition.js";
+import { hasCatalogFilters, searchExerciseCatalog } from "../services/exerciseCatalog.js";
 const router = express.Router();
 /** Exercises11 GIF host — may use a different RapidAPI key than ExerciseDB. */
 function getExercises11RapidApiKey() {
@@ -28,6 +29,50 @@ router.post('/enhance', async (req, res) => {
             console.log('⚠️  WARNING: FitnessOnePAT not found in environment variables');
             console.log('⚠️  Exercises will be returned without AI enhancement');
             console.log('⚠️  Add FitnessOnePAT to server/.env to enable AI analysis');
+        }
+        // ── Server-side search / filter mode ────────────────────────────────────
+        // When the client supplies any of search/bodyPart/target/equipment, query
+        // ExerciseDB directly instead of paging the whole catalog. Skips Clarifai so
+        // results are fast; images still come through the /image/:id proxy.
+        const searchTerm = typeof req.body.search === 'string' ? req.body.search.trim() : '';
+        const bodyPart = typeof req.body.bodyPart === 'string' ? req.body.bodyPart.trim() : '';
+        const target = typeof req.body.target === 'string' ? req.body.target.trim() : '';
+        const equipment = typeof req.body.equipment === 'string' ? req.body.equipment.trim() : '';
+        if (hasCatalogFilters({ search: searchTerm, bodyPart, target, equipment })) {
+            console.log(`🔎 Search mode: search="${searchTerm}" bodyPart="${bodyPart}" target="${target}" equipment="${equipment}" limit=${limit} offset=${offset}`);
+            const result = await searchExerciseCatalog({
+                search: searchTerm,
+                bodyPart,
+                target,
+                equipment,
+                limit,
+                offset,
+                apiKey: RAPID_API_KEY,
+            });
+            if (result.rateLimitError) {
+                return res.status(result.rateLimitError.status).json({
+                    success: false,
+                    message: result.rateLimitError.message,
+                    error: 'RapidAPI quota exceeded',
+                    details: result.rateLimitError.data,
+                    exercises: [],
+                    count: 0,
+                });
+            }
+            console.log(`✅ Search returned ${result.exercises.length} of ${result.total} matches`);
+            return res.json({
+                success: true,
+                message: `Found ${result.total} matching exercise${result.total === 1 ? '' : 's'}`,
+                exercises: result.exercises,
+                count: result.exercises.length,
+                pagination: {
+                    limit,
+                    offset,
+                    total: result.total,
+                    hasMore: result.hasMore,
+                    nextOffset: result.nextOffset,
+                },
+            });
         }
         console.log(`📡 Fetching ${limit} exercises from ExerciseDB (for metadata)...`);
         console.log(`🔍 ExercisesDB appears to cap at 10 exercises per request. Implementing pagination...`);
