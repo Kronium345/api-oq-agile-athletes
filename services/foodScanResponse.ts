@@ -25,6 +25,8 @@ export interface FoodScanApiPayload {
     primaryMin: number;
     alternateMin: number;
   };
+  vision?: { provider: string; model?: string };
+  nutrition?: { provider: string };
 }
 
 export function buildFoodScanApiPayload(analysis: FoodScanAnalysisResult): FoodScanApiPayload {
@@ -62,6 +64,14 @@ export function buildFoodScanApiPayload(analysis: FoodScanAnalysisResult): FoodS
       alternateMin: ALTERNATE_MIN_CONFIDENCE,
     },
   };
+
+  if (analysis.providers) {
+    payload.vision = {
+      provider: analysis.providers.vision,
+      model: analysis.providers.model,
+    };
+    payload.nutrition = { provider: analysis.providers.nutrition };
+  }
 
   if (analysis.identificationMessage) {
     payload.identificationMessage = analysis.identificationMessage;

@@ -10,9 +10,12 @@ export class FoodVisionError extends Error {
 }
 export function getFoodVisionProvider() {
     const explicit = process.env.FOOD_VISION_PROVIDER?.trim().toLowerCase();
-    if (explicit === 'http' || explicit === 'clarifai') {
+    if (explicit === 'gemini' || explicit === 'http' || explicit === 'clarifai') {
         return explicit;
     }
+    // Prefer Gemini when keyed (new default path); else Python URL; else Clarifai.
+    if (process.env.GEMINI_API_KEY?.trim())
+        return 'gemini';
     const url = process.env.FOOD_VISION_URL?.trim();
     return url ? 'http' : 'clarifai';
 }

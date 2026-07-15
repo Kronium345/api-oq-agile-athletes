@@ -1,6 +1,8 @@
 /** Minimum confidence to treat vision primary as reliable for meal totals. */
 export const PRIMARY_MIN_CONFIDENCE = Number(
-  process.env.FOOD_SCAN_PRIMARY_MIN_CONFIDENCE || 0.5
+  process.env.FOOD_SCAN_PRIMARY_MIN_CONFIDENCE ||
+    process.env.FOOD_VISION_MIN_CONFIDENCE ||
+    0.5
 );
 
 /** Minimum confidence to include a label in `alternates` (aligns with Python MIN_CONFIDENCE). */

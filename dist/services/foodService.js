@@ -1,11 +1,20 @@
 import axios from 'axios';
 import { assertReasonableImageBase64, postClarifaiJson, stripDataUrlPrefix, } from "./clarifaiClient.js";
 import { getFoodVisionProvider, predictFood, } from "./foodVisionClient.js";
+import { predictFoodWithGemini, getGeminiModel } from "./geminiFoodVision.js";
+import { isFitveteConfigured, pickBestFitveteFood, searchFoods, } from "./fitveteClient.js";
+import { normalizeFoodLabel } from "./foodLabelMap.js";
 import { prepareFoodScanBase64 } from "../utils/foodImagePrep.js";
 import { ALTERNATE_MIN_CONFIDENCE, ALTERNATE_NUTRITION_MIN_CONFIDENCE, PRIMARY_MIN_CONFIDENCE, } from "../utils/foodScanConfidence.js";
 const USDA_API_KEY = process.env.USDA_API_KEY || '';
 const FOOD_MODEL_URL = 'https://api.clarifai.com/v2/models/food-item-recognition/versions/1d5fd481e0cf4826aa72ec3ff049e044/outputs';
 const MAX_ALTERNATES = Number(process.env.FOOD_SCAN_MAX_ALTERNATES || 4);
+export function getNutritionProvider() {
+    const explicit = process.env.NUTRITION_PROVIDER?.trim().toLowerCase();
+    if (explicit === 'fitvete' || explicit === 'usda')
+        return explicit;
+    return isFitveteConfigured() ? 'fitvete' : 'usda';
+}
 export const foodKeywords = [
     'pizza', 'burger', 'sandwich', 'salad', 'pasta', 'sushi', 'cake', 'cookie',
     'rice', 'bread', 'meat', 'chicken', 'fish', 'soup', 'stew', 'curry',
@@ -65,6 +74,41 @@ export function matchesFoodKeywords(name) {
     return foodKeywords.some((keyword) => normalized.includes(keyword));
 }
 export async function getNutritionInfo(foodItem) {
+    const provider = getNutritionProvider();
+    if (provider === 'fitvete') {
+        return getFitveteNutritionInfo(foodItem);
+    }
+    return getUsdaNutritionInfo(foodItem);
+}
+async function getFitveteNutritionInfo(foodItem) {
+    try {
+        const query = normalizeFoodLabel(foodItem.name);
+        const result = await searchFoods(query);
+        const best = pickBestFitveteFood(result.foods);
+        if (!best) {
+            return { name: foodItem.name, confidence: foodItem.confidence, nutrients: null };
+        }
+        return {
+            name: best.name || foodItem.name,
+            confidence: foodItem.confidence,
+            nutrients: {
+                calories: best.calories,
+                fats: best.fat_g,
+                carbs: best.carbs_g,
+                protein: best.protein_g,
+                vitamins: [],
+                minerals: [],
+            },
+        };
+    }
+    catch (error) {
+        const err = error;
+        console.log(`ERROR fetching FitVete data for ${foodItem.name}`, err.message);
+        // Soft-fail nutrition so vision label can still surface for manual search.
+        return { name: foodItem.name, confidence: foodItem.confidence, nutrients: null };
+    }
+}
+async function getUsdaNutritionInfo(foodItem) {
     if (!USDA_API_KEY) {
         return { name: foodItem.name, confidence: foodItem.confidence, nutrients: null };
     }
@@ -86,11 +130,33 @@ export async function getNutritionInfo(foodItem) {
         return { name: foodItem.name, confidence: foodItem.confidence, nutrients: null };
     }
 }
-/** Manual correction: USDA text search (multiple matches). */
+/** Manual correction: text search (FitVete or USDA). */
 export async function searchFoodNutrition(query, limit = 8) {
     const trimmed = query.trim();
     if (!trimmed)
         return [];
+    if (getNutritionProvider() === 'fitvete') {
+        try {
+            const result = await searchFoods(normalizeFoodLabel(trimmed), limit);
+            return result.foods.map((food) => ({
+                name: food.name,
+                nutrients: {
+                    calories: food.calories,
+                    fats: food.fat_g,
+                    carbs: food.carbs_g,
+                    protein: food.protein_g,
+                    vitamins: [],
+                    minerals: [],
+                },
+                source: food.source || result.source || 'fitvete',
+            }));
+        }
+        catch (error) {
+            const err = error;
+            console.log(`ERROR searching FitVete for ${trimmed}`, err.message);
+            return [];
+        }
+    }
     if (!USDA_API_KEY) {
         return [{ name: trimmed, nutrients: null }];
     }
@@ -101,6 +167,7 @@ export async function searchFoodNutrition(query, limit = 8) {
             name: food.description || trimmed,
             fdcId: food.fdcId,
             nutrients: extractNutrients(food),
+            source: 'usda',
         }));
     }
     catch (error) {
@@ -133,7 +200,7 @@ async function enrichAlternates(concepts) {
         };
     }));
 }
-async function buildHttpVisionAnalysis(primaryConcept, allConcepts) {
+async function buildHttpVisionAnalysis(primaryConcept, allConcepts, providers) {
     const quality = primaryConcept.confidence >= PRIMARY_MIN_CONFIDENCE ? 'high' : 'low';
     const alternateConcepts = filterAlternateConcepts(allConcepts, primaryConcept.name);
     const alternates = await enrichAlternates(alternateConcepts);
@@ -146,6 +213,7 @@ async function buildHttpVisionAnalysis(primaryConcept, allConcepts) {
             alternates,
             foodItems: [primary],
             uncertainIdentification: false,
+            providers,
         };
     }
     return {
@@ -159,6 +227,7 @@ async function buildHttpVisionAnalysis(primaryConcept, allConcepts) {
         foodItems: [],
         uncertainIdentification: false,
         identificationMessage: 'Could not identify this food confidently. Choose an alternate below or search by name (e.g. chicken, rice bowl).',
+        providers,
     };
 }
 async function getClarifaiFoodConcepts(cleanBase64) {
@@ -236,9 +305,47 @@ export async function analyzeImage(imageBase64) {
     const cleanBase64 = await prepareFoodScanBase64(stripped);
     assertReasonableImageBase64(cleanBase64);
     const provider = getFoodVisionProvider();
+    const nutritionProvider = getNutritionProvider();
+    if (provider === 'gemini') {
+        const result = await predictFoodWithGemini(cleanBase64);
+        const providers = {
+            vision: 'gemini',
+            nutrition: nutritionProvider,
+            model: result.model || getGeminiModel(),
+        };
+        console.log('[food-vision] gemini predict', {
+            model: result.model,
+            inferenceMs: result.inferenceMs,
+            isFood: result.isFood,
+            primary: result.primaryConcept?.name,
+            primaryConfidence: result.primaryConcept?.confidence,
+        });
+        if (!result.isFood || !result.primaryConcept) {
+            return {
+                identificationQuality: 'none',
+                primary: null,
+                visionSuggestion: null,
+                alternates: [],
+                foodItems: [],
+                uncertainIdentification: true,
+                identificationMessage: 'Could not identify food clearly in this photo. Try a clearer meal photo or search by name.',
+                providers,
+            };
+        }
+        const allConcepts = result.concepts.map((c) => ({
+            name: c.name,
+            confidence: c.confidence,
+        }));
+        return buildHttpVisionAnalysis(result.primaryConcept, allConcepts, providers);
+    }
     if (provider === 'http') {
         const result = await predictFood(cleanBase64);
         const { primaryConcept, concepts } = result;
+        const providers = {
+            vision: 'http',
+            nutrition: nutritionProvider,
+            model: result.model,
+        };
         console.log('[food-vision] predict', {
             model: result.model,
             inferenceMs: result.inferenceMs,
@@ -250,11 +357,15 @@ export async function analyzeImage(imageBase64) {
             name: c.name,
             confidence: c.confidence,
         }));
-        return buildHttpVisionAnalysis(primaryConcept, allConcepts);
+        return buildHttpVisionAnalysis(primaryConcept, allConcepts, providers);
     }
     const rawConcepts = await getClarifaiFoodConcepts(cleanBase64);
     const filtered = filterFoodConcepts(rawConcepts, provider);
     const primaryConcept = pickPrimaryConcept(filtered);
+    const providers = {
+        vision: 'clarifai',
+        nutrition: nutritionProvider,
+    };
     if (!primaryConcept) {
         return {
             identificationQuality: 'none',
@@ -264,11 +375,13 @@ export async function analyzeImage(imageBase64) {
             foodItems: [],
             uncertainIdentification: true,
             identificationMessage: 'No food items detected in the image.',
+            providers,
         };
     }
     const primary = { name: primaryConcept.name, confidence: primaryConcept.value ?? 0 };
     const alternates = alternateConceptsFromList(filtered, primaryConcept);
-    return buildClarifaiAnalysis(primary, alternates);
+    const analysis = await buildClarifaiAnalysis(primary, alternates);
+    return { ...analysis, providers };
 }
 /** Whether vision detected food in the image (includes low-confidence / manual correction path). */
 export function isFoodScanResult(analysis) {

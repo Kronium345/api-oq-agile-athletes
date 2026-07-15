@@ -6,6 +6,9 @@ import {
   checkFoodVisionReady,
   getFoodVisionProvider,
 } from './services/foodVisionClient.ts';
+import { getNutritionProvider } from './services/foodService.ts';
+import { isFitveteConfigured } from './services/fitveteClient.ts';
+import { isGeminiConfigured } from './services/geminiFoodVision.ts';
 import { ensureQuizDataSeeded, getQuizBootstrapStatus } from './services/quizBootstrap.ts';
 // import { ensureTrainerDataSeeded } from './services/trainerBootstrap.ts';
 import { buildDeleteAccountPlayStoreHtml } from './deleteAccountPage.ts';
@@ -147,16 +150,25 @@ async function startServer() {
     // });
 
     const foodVisionProvider = getFoodVisionProvider();
+    const nutritionProvider = getNutritionProvider();
+    console.log('[food-vision] providers:', {
+      vision: foodVisionProvider,
+      nutrition: nutritionProvider,
+      geminiConfigured: isGeminiConfigured(),
+      fitveteConfigured: isFitveteConfigured(),
+    });
     if (foodVisionProvider === 'http') {
       const ready = await checkFoodVisionReady();
-      console.log('[food-vision] provider=http', { ready });
+      console.log('[food-vision] python http ready:', { ready });
       if (!ready) {
         console.warn(
           '[food-vision] Python service /ready is not 200 yet (cold start). Food scans may return 503 until the model loads.'
         );
       }
-    } else {
-      console.log('[food-vision] provider=clarifai');
+    } else if (foodVisionProvider === 'gemini' && !isGeminiConfigured()) {
+      console.warn('[food-vision] FOOD_VISION_PROVIDER=gemini but GEMINI_API_KEY is missing');
+    } else if (nutritionProvider === 'fitvete' && !isFitveteConfigured()) {
+      console.warn('[food-vision] NUTRITION_PROVIDER=fitvete but FITVETE_API_KEY is missing');
     }
 
     if (process.env.FORM_COACH_API_URL?.trim()) {
