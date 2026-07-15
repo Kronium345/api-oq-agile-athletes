@@ -54,6 +54,8 @@ export function assertExerciseEnabled(exerciseId, catalog) {
     }
 }
 const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
+/** Body-scan photos (front + optional side); keep stricter than video uploads. */
+const MAX_BODY_SCAN_IMAGE_BYTES = 15 * 1024 * 1024;
 const RETRYABLE_STATUSES = new Set([503, 502, 504]);
 function getBaseUrl() {
     const raw = process.env.FORM_COACH_API_URL?.trim();
@@ -90,7 +92,7 @@ function mapHttpError(status, detail) {
     if (status === 400)
         return new FormCoachError(msg, 400, detail);
     if (status === 413)
-        return new FormCoachError('Video exceeds the 50MB size limit.', 413, detail);
+        return new FormCoachError('Upload exceeds the size limit.', 413, detail);
     if (status === 503) {
         return new FormCoachError('Form Coach service is starting up. Please try again in a moment.', 503, detail);
     }
@@ -219,6 +221,61 @@ export async function analyzeFormVideo(params) {
     }
     return (await res.json());
 }
+export function assertBodyScanImageSize(byteLength, label = 'image') {
+    if (byteLength > MAX_BODY_SCAN_IMAGE_BYTES) {
+        throw new FormCoachError(`${label} exceeds the 15MB size limit.`, 413);
+    }
+    if (byteLength === 0) {
+        throw new FormCoachError(`${label} file is empty.`, 400);
+    }
+}
+function appendBodyScanImage(form, field, part) {
+    assertBodyScanImageSize(part.buffer.length, field);
+    const blob = new Blob([new Uint8Array(part.buffer)], {
+        type: part.contentType || 'image/jpeg',
+    });
+    form.append(field, blob, part.filename);
+}
+/**
+ * Proxies multipart body composition scan to Form Coach POST /body-scan.
+ * Does not interpret medical meaning — returns upstream JSON as-is.
+ */
+export async function submitBodyScan(params) {
+    const form = new FormData();
+    appendBodyScanImage(form, 'front_image', params.frontImage);
+    if (params.sideImage) {
+        appendBodyScanImage(form, 'side_image', params.sideImage);
+    }
+    form.append('height_cm', String(params.heightCm));
+    form.append('weight_kg', String(params.weightKg));
+    form.append('age', String(params.age));
+    form.append('sex', params.sex);
+    const res = await requestWithRetry(`${getBaseUrl()}/body-scan`, {
+        method: 'POST',
+        body: form,
+    });
+    if (!res.ok) {
+        const detail = parseErrorDetail(await res.json().catch(() => null));
+        if (res.status === 503) {
+            throw new FormCoachError('Scan temporarily unavailable. Please try again in a moment.', 503, detail);
+        }
+        throw mapHttpError(res.status, detail);
+    }
+    return (await res.json());
+}
+export async function checkBodyScanReady() {
+    try {
+        if (!process.env.FORM_COACH_API_URL?.trim())
+            return false;
+        if (process.env.BODY_SCAN_ENABLED === 'false')
+            return false;
+        const health = await getFormCoachHealth();
+        return health.status === 'ok' || health.status === 'healthy';
+    }
+    catch {
+        return false;
+    }
+}
 export async function fetchVideoFromUrl(videoUrl) {
     let parsed;
     try {
@@ -249,4 +306,4 @@ export async function fetchVideoFromUrl(videoUrl) {
         contentType,
     };
 }
-export { MAX_VIDEO_BYTES };
+export { MAX_VIDEO_BYTES, MAX_BODY_SCAN_IMAGE_BYTES };

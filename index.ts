@@ -39,9 +39,11 @@ import stripeWebhookRoutes from './routes/stripeWebhook.ts';
 import trainersRoutes from './routes/trainers.ts';
 import workflowRoutes from './routes/workflow.ts';
 import formCoachRoutes from './routes/formCoach.ts';
+import bodyScanRoutes from './routes/bodyScan.ts';
 import performanceRoutes from './routes/performance.ts';
-import { checkFormCoachReady } from './services/formCoachClient.ts';
+import { checkBodyScanReady, checkFormCoachReady } from './services/formCoachClient.ts';
 import { logQstashStartup } from './utils/upstashEnv.ts';
+import { ensureBodyScanIndexes } from './models/bodyScan.ts';
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -78,6 +80,7 @@ app.use('/api/steps', stepsRoutes);
 app.use('/api/exercises', exercisesRoutes);
 app.use('/api/exercise-recognition', exerciseRecognitionRoutes);
 app.use('/api/form-coach', formCoachRoutes);
+app.use('/api/body-scan', bodyScanRoutes);
 app.use('/history', historyRoutes);
 app.use('/favorites', favoritesRoutes);
 app.use('/user', userRoutes);
@@ -115,6 +118,7 @@ async function startServer() {
     await ensureFitnessGroupIndexes();
     await ensureStepHistoryIndexes();
     await ensurePerformanceCheckinIndexes();
+    await ensureBodyScanIndexes();
     verifyEmailTransport();
     const welcomeLogo = welcomeEmailLogoUrl();
     if (welcomeLogo) {
@@ -162,6 +166,13 @@ async function startServer() {
         console.warn(
           '[form-coach] Python service /health is not OK yet (Render cold start). Analysis may fail until it wakes.'
         );
+      }
+      const bodyScanEnabled = process.env.BODY_SCAN_ENABLED !== 'false';
+      if (bodyScanEnabled) {
+        const bodyScanReady = await checkBodyScanReady();
+        console.log('[body-scan] feature enabled:', { ready: bodyScanReady });
+      } else {
+        console.log('[body-scan] BODY_SCAN_ENABLED=false — body scan disabled');
       }
     } else {
       console.log('[form-coach] FORM_COACH_API_URL not set — form analysis disabled');

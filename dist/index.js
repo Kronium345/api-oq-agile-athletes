@@ -35,9 +35,11 @@ import stripeWebhookRoutes from "./routes/stripeWebhook.js";
 import trainersRoutes from "./routes/trainers.js";
 import workflowRoutes from "./routes/workflow.js";
 import formCoachRoutes from "./routes/formCoach.js";
+import bodyScanRoutes from "./routes/bodyScan.js";
 import performanceRoutes from "./routes/performance.js";
-import { checkFormCoachReady } from "./services/formCoachClient.js";
+import { checkBodyScanReady, checkFormCoachReady } from "./services/formCoachClient.js";
 import { logQstashStartup } from "./utils/upstashEnv.js";
+import { ensureBodyScanIndexes } from "./models/bodyScan.js";
 const app = express();
 const PORT = process.env.PORT || 4000;
 app.use(cors());
@@ -66,6 +68,7 @@ app.use('/api/steps', stepsRoutes);
 app.use('/api/exercises', exercisesRoutes);
 app.use('/api/exercise-recognition', exerciseRecognitionRoutes);
 app.use('/api/form-coach', formCoachRoutes);
+app.use('/api/body-scan', bodyScanRoutes);
 app.use('/history', historyRoutes);
 app.use('/favorites', favoritesRoutes);
 app.use('/user', userRoutes);
@@ -100,6 +103,7 @@ async function startServer() {
         await ensureFitnessGroupIndexes();
         await ensureStepHistoryIndexes();
         await ensurePerformanceCheckinIndexes();
+        await ensureBodyScanIndexes();
         verifyEmailTransport();
         const welcomeLogo = welcomeEmailLogoUrl();
         if (welcomeLogo) {
@@ -142,6 +146,14 @@ async function startServer() {
             console.log('[form-coach] service configured:', { ready: formCoachReady });
             if (!formCoachReady) {
                 console.warn('[form-coach] Python service /health is not OK yet (Render cold start). Analysis may fail until it wakes.');
+            }
+            const bodyScanEnabled = process.env.BODY_SCAN_ENABLED !== 'false';
+            if (bodyScanEnabled) {
+                const bodyScanReady = await checkBodyScanReady();
+                console.log('[body-scan] feature enabled:', { ready: bodyScanReady });
+            }
+            else {
+                console.log('[body-scan] BODY_SCAN_ENABLED=false — body scan disabled');
             }
         }
         else {
