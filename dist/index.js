@@ -40,9 +40,11 @@ import workflowRoutes from "./routes/workflow.js";
 import formCoachRoutes from "./routes/formCoach.js";
 import bodyScanRoutes from "./routes/bodyScan.js";
 import performanceRoutes from "./routes/performance.js";
+import recoveryRoutes from "./routes/recovery.js";
 import { checkBodyScanReady, checkFormCoachReady } from "./services/formCoachClient.js";
 import { logQstashStartup } from "./utils/upstashEnv.js";
 import { ensureBodyScanIndexes } from "./models/bodyScan.js";
+import { ensureRecoverySessionIndexes } from "./models/recoverySession.js";
 const app = express();
 const PORT = process.env.PORT || 4000;
 app.use(cors());
@@ -82,6 +84,7 @@ app.use('/trainers', trainersRoutes);
 app.use('/bookings', bookingsRoutes);
 app.use('/community', communityRoutes);
 app.use('/performance', performanceRoutes);
+app.use('/recovery', recoveryRoutes);
 app.use('/uploads', express.static('uploads'));
 app.use((err, req, res, next) => {
     console.error('Error:', err);
@@ -107,6 +110,7 @@ async function startServer() {
         await ensureStepHistoryIndexes();
         await ensurePerformanceCheckinIndexes();
         await ensureBodyScanIndexes();
+        await ensureRecoverySessionIndexes();
         verifyEmailTransport();
         const welcomeLogo = welcomeEmailLogoUrl();
         if (welcomeLogo) {

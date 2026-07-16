@@ -80,7 +80,9 @@ export function buildRecommendations(inputs, trainingLoad) {
         recs.push({
             type: 'stress',
             severity: 'warning',
-            message: 'Consider a light walk or breathing exercise.',
+            message: 'Stress looks elevated — a short guided breathing session may help you unwind. This is a wellness habit, not medical treatment.',
+            protocolId: 'stress_reset',
+            deepLink: '/(drawer)/recovery/breathing?protocol=stress_reset&source=performance_hub',
         });
     }
     if (inputs.energy <= 4) {

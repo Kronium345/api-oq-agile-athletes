@@ -3,6 +3,7 @@ import { getStepsByDate } from "../models/stepHistory.js";
 import { getUserById } from "../models/user.js";
 import { computeRecoveryScore } from "./performanceScoring.js";
 import { computeTrainingLoadBand, fetchDailyLoads, resolveTrainingLoad, } from "./performanceTrainingLoad.js";
+import { getBreathingSessionsInWeek, getSuggestedBreathingForToday, } from "./recoveryHub.js";
 import { addDaysUtc, todayUtc, weekStartMondayUtc } from "../utils/stepDates.js";
 function defaultDailyStepGoal(user) {
     const envDefault = Number(process.env.DEFAULT_DAILY_STEP_GOAL);
@@ -65,6 +66,7 @@ export async function submitPerformanceCheckIn(userId, payload) {
     return toPerformanceDashboard(saved);
 }
 export async function getPerformanceToday(userId, date) {
+    const breathing = await getSuggestedBreathingForToday(userId, date);
     const row = await getPerformanceCheckinByDate(userId, date);
     if (!row) {
         const dailyLoads = await fetchDailyLoads(userId, date, 28);
@@ -73,11 +75,17 @@ export async function getPerformanceToday(userId, date) {
             date,
             hasCheckIn: false,
             trainingLoad: band,
+            breathingSessionsToday: breathing.breathingSessionsToday,
+            suggestedBreathingProtocolId: breathing.suggestedBreathingProtocolId,
+            suggestedNextAction: breathing.suggestedNextAction,
         };
     }
     return {
         ...toPerformanceDashboard(row),
         hasCheckIn: true,
+        breathingSessionsToday: breathing.breathingSessionsToday,
+        suggestedBreathingProtocolId: breathing.suggestedBreathingProtocolId,
+        suggestedNextAction: breathing.suggestedNextAction,
     };
 }
 export async function getPerformanceCheckInHistory(userId, options) {
@@ -141,12 +149,16 @@ function dominantTrainingLoad(summary) {
 export async function getPerformanceWeeklySummary(userId, weekStart) {
     const weekEnd = addDaysUtc(weekStart, 6);
     const rows = await listPerformanceCheckinsInRange(userId, weekStart, weekEnd);
+    const breathingSessionsWeek = await getBreathingSessionsInWeek(userId, weekStart);
     const trainingLoadSummary = {
         Normal: 0,
         Building: 0,
         High: 0,
         'Very High': 0,
     };
+    const breathingLine = breathingSessionsWeek > 0
+        ? ` You completed ${breathingSessionsWeek} recovery breathing session${breathingSessionsWeek === 1 ? '' : 's'} this week.`
+        : '';
     if (!rows.length) {
         return {
             weekStart,
@@ -159,7 +171,8 @@ export async function getPerformanceWeeklySummary(userId, weekStart) {
                 energyScore: 0,
             },
             dominantTrainingLoad: 'Normal',
-            narrative: 'No check-ins recorded this week. Log daily readiness to unlock recovery insights.',
+            breathingSessionsWeek,
+            narrative: `No check-ins recorded this week. Log daily readiness to unlock recovery insights.${breathingLine}`.trim(),
         };
     }
     const sum = rows.reduce((acc, row) => {
@@ -178,7 +191,7 @@ export async function getPerformanceWeeklySummary(userId, weekStart) {
         energyScore: Math.round(sum.energyScore / count),
     };
     const dominant = dominantTrainingLoad(trainingLoadSummary);
-    const narrative = `You logged ${count} readiness check-in${count === 1 ? '' : 's'} this week with an average recovery score of ${averages.recoveryScore}. Training load was mostly ${dominant}. ${averages.sleepScore < 70 ? 'Sleep scores suggest prioritising rest.' : 'Sleep and recovery trends look steady — keep balancing load with rest.'}`;
+    const narrative = `You logged ${count} readiness check-in${count === 1 ? '' : 's'} this week with an average recovery score of ${averages.recoveryScore}. Training load was mostly ${dominant}. ${averages.sleepScore < 70 ? 'Sleep scores suggest prioritising rest.' : 'Sleep and recovery trends look steady — keep balancing load with rest.'}${breathingLine}`;
     return {
         weekStart,
         weekEnd,
@@ -186,6 +199,7 @@ export async function getPerformanceWeeklySummary(userId, weekStart) {
         averages,
         dominantTrainingLoad: dominant,
         trainingLoadSummary,
+        breathingSessionsWeek,
         narrative,
     };
 }

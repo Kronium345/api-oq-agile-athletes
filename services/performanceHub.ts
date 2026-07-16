@@ -13,6 +13,10 @@ import {
   fetchDailyLoads,
   resolveTrainingLoad,
 } from './performanceTrainingLoad.ts';
+import {
+  getBreathingSessionsInWeek,
+  getSuggestedBreathingForToday,
+} from './recoveryHub.ts';
 import { addDaysUtc, todayUtc, weekStartMondayUtc } from '../utils/stepDates.ts';
 
 function defaultDailyStepGoal(user: { dailyStepGoal?: number } | null): number {
@@ -86,6 +90,8 @@ export async function submitPerformanceCheckIn(
 }
 
 export async function getPerformanceToday(userId: string, date: string) {
+  const breathing = await getSuggestedBreathingForToday(userId, date);
+
   const row = await getPerformanceCheckinByDate(userId, date);
   if (!row) {
     const dailyLoads = await fetchDailyLoads(userId, date, 28);
@@ -94,12 +100,18 @@ export async function getPerformanceToday(userId: string, date: string) {
       date,
       hasCheckIn: false as const,
       trainingLoad: band,
+      breathingSessionsToday: breathing.breathingSessionsToday,
+      suggestedBreathingProtocolId: breathing.suggestedBreathingProtocolId,
+      suggestedNextAction: breathing.suggestedNextAction,
     };
   }
 
   return {
     ...toPerformanceDashboard(row),
     hasCheckIn: true as const,
+    breathingSessionsToday: breathing.breathingSessionsToday,
+    suggestedBreathingProtocolId: breathing.suggestedBreathingProtocolId,
+    suggestedNextAction: breathing.suggestedNextAction,
   };
 }
 
@@ -176,6 +188,7 @@ function dominantTrainingLoad(summary: Record<string, number>): string {
 export async function getPerformanceWeeklySummary(userId: string, weekStart: string) {
   const weekEnd = addDaysUtc(weekStart, 6);
   const rows = await listPerformanceCheckinsInRange(userId, weekStart, weekEnd);
+  const breathingSessionsWeek = await getBreathingSessionsInWeek(userId, weekStart);
 
   const trainingLoadSummary: Record<string, number> = {
     Normal: 0,
@@ -183,6 +196,11 @@ export async function getPerformanceWeeklySummary(userId: string, weekStart: str
     High: 0,
     'Very High': 0,
   };
+
+  const breathingLine =
+    breathingSessionsWeek > 0
+      ? ` You completed ${breathingSessionsWeek} recovery breathing session${breathingSessionsWeek === 1 ? '' : 's'} this week.`
+      : '';
 
   if (!rows.length) {
     return {
@@ -196,8 +214,9 @@ export async function getPerformanceWeeklySummary(userId: string, weekStart: str
         energyScore: 0,
       },
       dominantTrainingLoad: 'Normal',
+      breathingSessionsWeek,
       narrative:
-        'No check-ins recorded this week. Log daily readiness to unlock recovery insights.',
+        `No check-ins recorded this week. Log daily readiness to unlock recovery insights.${breathingLine}`.trim(),
     };
   }
 
@@ -223,7 +242,7 @@ export async function getPerformanceWeeklySummary(userId: string, weekStart: str
 
   const dominant = dominantTrainingLoad(trainingLoadSummary);
 
-  const narrative = `You logged ${count} readiness check-in${count === 1 ? '' : 's'} this week with an average recovery score of ${averages.recoveryScore}. Training load was mostly ${dominant}. ${averages.sleepScore < 70 ? 'Sleep scores suggest prioritising rest.' : 'Sleep and recovery trends look steady — keep balancing load with rest.'}`;
+  const narrative = `You logged ${count} readiness check-in${count === 1 ? '' : 's'} this week with an average recovery score of ${averages.recoveryScore}. Training load was mostly ${dominant}. ${averages.sleepScore < 70 ? 'Sleep scores suggest prioritising rest.' : 'Sleep and recovery trends look steady — keep balancing load with rest.'}${breathingLine}`;
 
   return {
     weekStart,
@@ -232,6 +251,7 @@ export async function getPerformanceWeeklySummary(userId: string, weekStart: str
     averages,
     dominantTrainingLoad: dominant,
     trainingLoadSummary,
+    breathingSessionsWeek,
     narrative,
   };
 }

@@ -44,9 +44,11 @@ import workflowRoutes from './routes/workflow.ts';
 import formCoachRoutes from './routes/formCoach.ts';
 import bodyScanRoutes from './routes/bodyScan.ts';
 import performanceRoutes from './routes/performance.ts';
+import recoveryRoutes from './routes/recovery.ts';
 import { checkBodyScanReady, checkFormCoachReady } from './services/formCoachClient.ts';
 import { logQstashStartup } from './utils/upstashEnv.ts';
 import { ensureBodyScanIndexes } from './models/bodyScan.ts';
+import { ensureRecoverySessionIndexes } from './models/recoverySession.ts';
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -94,6 +96,7 @@ app.use('/trainers', trainersRoutes);
 app.use('/bookings', bookingsRoutes);
 app.use('/community', communityRoutes);
 app.use('/performance', performanceRoutes);
+app.use('/recovery', recoveryRoutes);
 app.use('/uploads', express.static('uploads'));
 
 app.use((err: any, req: any, res: any, next: any) => {
@@ -122,6 +125,7 @@ async function startServer() {
     await ensureStepHistoryIndexes();
     await ensurePerformanceCheckinIndexes();
     await ensureBodyScanIndexes();
+    await ensureRecoverySessionIndexes();
     verifyEmailTransport();
     const welcomeLogo = welcomeEmailLogoUrl();
     if (welcomeLogo) {
