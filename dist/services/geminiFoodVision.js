@@ -50,8 +50,8 @@ function getApiKey() {
     return key;
 }
 export function getGeminiModel() {
-    // gemini-2.0-flash was shut down mid-2026; default to a current Flash id.
-    return process.env.GEMINI_MODEL?.trim() || 'gemini-2.5-flash';
+    // Prefer Gemini 3.5 Flash — 2.5/2.0 Flash are restricted or retired for new keys.
+    return process.env.GEMINI_MODEL?.trim() || 'gemini-3.5-flash';
 }
 function getTimeoutMs() {
     return Number(process.env.GEMINI_TIMEOUT_MS || 60000);

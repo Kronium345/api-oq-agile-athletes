@@ -18,7 +18,7 @@ Mobile → POST /analyze-food | /foodScan/analyze
 ```bash
 FOOD_VISION_PROVIDER=gemini
 GEMINI_API_KEY=...
-GEMINI_MODEL=gemini-2.5-flash          # lock deliberately (2.0-flash shut down)
+GEMINI_MODEL=gemini-3.5-flash          # lock deliberately (2.5-flash blocked for new keys)
 GEMINI_TIMEOUT_MS=60000
 FOOD_SCAN_PRIMARY_MIN_CONFIDENCE=0.5   # or FOOD_VISION_MIN_CONFIDENCE
 
@@ -53,7 +53,7 @@ Optional additive fields on analyze payloads:
 
 ```json
 {
-  "vision": { "provider": "gemini", "model": "gemini-2.5-flash" },
+  "vision": { "provider": "gemini", "model": "gemini-3.5-flash" },
   "nutrition": { "provider": "fitvete" }
 }
 ```
