@@ -133,7 +133,7 @@ export function assertExerciseEnabled(
 const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
 /** Body-scan photos (front + optional side); keep stricter than video uploads. */
 const MAX_BODY_SCAN_IMAGE_BYTES = 15 * 1024 * 1024;
-const RETRYABLE_STATUSES = new Set([503, 502, 504]);
+const RETRYABLE_STATUSES = new Set([502, 503]);
 
 function getBaseUrl(): string {
   const raw = process.env.FORM_COACH_API_URL?.trim();
@@ -147,7 +147,7 @@ function getBaseUrl(): string {
 }
 
 function getTimeoutMs(): number {
-  return Number(process.env.FORM_COACH_TIMEOUT_MS || 120_000);
+  return Number(process.env.FORM_COACH_TIMEOUT_MS || 600_000);
 }
 
 function parseErrorDetail(data: unknown): string | undefined {
@@ -238,7 +238,7 @@ async function requestWithRetry(
     } catch (err) {
       if (err instanceof FormCoachError) {
         lastError = err;
-        if (attempt === 0 && (err.statusCode === 503 || err.statusCode === 504)) {
+        if (attempt === 0 && err.statusCode === 503) {
           console.warn('[form-coach] retrying after connection/timeout error');
           await new Promise((r) => setTimeout(r, 2000));
           continue;
