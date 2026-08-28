@@ -13,6 +13,7 @@ import { geocodeUkPostcode, toGeoPoint } from "../utils/geocode.js";
 import { routeParam } from "../utils/routeParams.js";
 import { getDisplayName } from "../utils/userDisplay.js";
 import { toTrainerDetail, toTrainerListItem } from "../utils/trainerResponse.js";
+import trainerContentRoutes from "./trainerContent.js";
 const router = express.Router();
 router.use(async (_req, _res, next) => {
     try {
@@ -245,6 +246,7 @@ router.put('/availability', authenticate, requireTrainer, async (req, res) => {
         return res.status(500).json({ success: false, error: 'Failed to update availability' });
     }
 });
+router.use(trainerContentRoutes);
 router.get('/', async (req, res) => {
     try {
         const specialty = typeof req.query.specialty === 'string' ? req.query.specialty : undefined;

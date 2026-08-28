@@ -45,6 +45,7 @@ import { geocodeUkPostcode, toGeoPoint } from '../utils/geocode.ts';
 import { routeParam } from '../utils/routeParams.ts';
 import { getDisplayName } from '../utils/userDisplay.ts';
 import { toTrainerDetail, toTrainerListItem } from '../utils/trainerResponse.ts';
+import trainerContentRoutes from './trainerContent.ts';
 
 const router = express.Router();
 
@@ -313,6 +314,8 @@ router.put(
     }
   }
 );
+
+router.use(trainerContentRoutes);
 
 router.get('/', async (req, res: Response) => {
   try {

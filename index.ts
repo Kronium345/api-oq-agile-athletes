@@ -46,6 +46,10 @@ import bodyScanRoutes from './routes/bodyScan.ts';
 import performanceRoutes from './routes/performance.ts';
 import recoveryRoutes from './routes/recovery.ts';
 import { checkBodyScanReady, checkFormCoachReady } from './services/formCoachClient.ts';
+import {
+  getTrainerVideoStorageProvider,
+  isTrainerVideoStorageReady,
+} from './services/trainerVideoStorage.ts';
 import { logQstashStartup } from './utils/upstashEnv.ts';
 import { ensureBodyScanIndexes } from './models/bodyScan.ts';
 import { ensureRecoverySessionIndexes } from './models/recoverySession.ts';
@@ -192,6 +196,15 @@ async function startServer() {
       }
     } else {
       console.log('[form-coach] FORM_COACH_API_URL not set — form analysis disabled');
+    }
+
+    const trainerVideoProvider = getTrainerVideoStorageProvider();
+    console.log('[trainer-videos] storage:', {
+      provider: trainerVideoProvider,
+      ready: isTrainerVideoStorageReady(),
+    });
+    if (trainerVideoProvider === 'r2' && !isTrainerVideoStorageReady()) {
+      console.warn('[trainer-videos] TRAINER_VIDEO_STORAGE=r2 but R2_* env vars are incomplete');
     }
 
     const server = app.listen(PORT, () => {
