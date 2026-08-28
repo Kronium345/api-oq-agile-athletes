@@ -61,6 +61,12 @@ function toClientScan(record: BodyScanRecord) {
     createdAt: record.createdAt,
     bodyFatPercent: record.bodyFatPercent,
     bmi: record.bmi,
+    leanMassKg:
+      typeof record.raw?.lean_mass_kg === 'number'
+        ? record.raw.lean_mass_kg
+        : null,
+    fatMassKg:
+      typeof record.raw?.fat_mass_kg === 'number' ? record.raw.fat_mass_kg : null,
     measurementsCm: record.measurementsCm,
     measurementSources,
     confidence: record.confidence,

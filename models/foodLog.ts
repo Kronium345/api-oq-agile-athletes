@@ -1,6 +1,7 @@
 import { Collection } from 'mongodb';
 import { getMongoClient, getMongoDbName } from '../config/mongoClient.ts';
 import { endOfDay, parseYyyyMmDd, startOfDay } from '../utils/dateRanges.ts';
+import { sanitizeImageUrl } from '../utils/foodImageUrl.ts';
 
 const FOOD_LOG_TABLE = process.env.MONGO_FOOD_LOG_COLLECTION || 'food_logs';
 
@@ -12,7 +13,8 @@ export interface FoodLogDocument {
   fats: number;
   proteins: number;
   sugars: number;
-  imageUrl: string;
+  /** Optional — historic rows store the literal string 'N/A', normalized away on read. */
+  imageUrl?: string;
   loggedAt: Date;
 }
 
@@ -26,6 +28,7 @@ function serializeLog(doc: FoodLogDocument & { _id?: unknown }) {
     ...doc,
     _id: doc._id != null ? String(doc._id) : undefined,
     loggedAt: doc.loggedAt instanceof Date ? doc.loggedAt.toISOString() : doc.loggedAt,
+    imageUrl: sanitizeImageUrl(doc.imageUrl),
   };
 }
 

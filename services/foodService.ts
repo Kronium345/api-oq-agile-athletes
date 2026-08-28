@@ -70,6 +70,8 @@ export interface FoodItemWithNutrition {
   name: string;
   confidence: number;
   nutrients: FoodNutrients | null;
+  /** Thumbnail derived from the food name — see services/foodImageService.ts. */
+  imageUrl?: string;
 }
 
 export interface VisionSuggestion {
@@ -227,6 +229,8 @@ export interface NutritionSearchResult {
   fdcId?: number;
   nutrients: FoodNutrients | null;
   source?: string;
+  /** Thumbnail derived from the food name — see services/foodImageService.ts. */
+  imageUrl?: string;
 }
 
 /** @deprecated Prefer NutritionSearchResult — kept for existing imports. */
