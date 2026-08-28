@@ -47,7 +47,10 @@ export interface FormCoachCatalogResult {
 export interface BodyScanUpstreamResult {
   body_fat_percent?: number;
   bmi?: number;
+  lean_mass_kg?: number;
+  fat_mass_kg?: number;
   measurements_cm?: Record<string, number>;
+  measurement_sources?: Record<string, string>;
   confidence?: string;
   warnings?: string[];
   disclaimer?: string;

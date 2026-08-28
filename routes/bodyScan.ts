@@ -50,12 +50,19 @@ router.use(async (_req, _res, next) => {
 });
 
 function toClientScan(record: BodyScanRecord) {
+  const rawSources = record.raw?.measurement_sources;
+  const measurementSources =
+    rawSources && typeof rawSources === 'object' && !Array.isArray(rawSources)
+      ? (rawSources as Record<string, string>)
+      : undefined;
+
   return {
     id: record.scanId,
     createdAt: record.createdAt,
     bodyFatPercent: record.bodyFatPercent,
     bmi: record.bmi,
     measurementsCm: record.measurementsCm,
+    measurementSources,
     confidence: record.confidence,
     warnings: record.warnings,
     disclaimer: record.disclaimer,
