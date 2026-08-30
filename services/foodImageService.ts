@@ -77,7 +77,7 @@ function stripQualifierWords(segment: string): string {
  * lookup found, including misses, so without a version a smarter algorithm would
  * keep serving the old answer until the TTL expired.
  */
-const LOOKUP_VERSION = 'v5';
+const LOOKUP_VERSION = 'v8';
 
 /** Cache/memo key for a food name, scoped to the candidate algorithm version. */
 function cacheKey(raw: string): string {
@@ -104,6 +104,13 @@ const NON_DISH_MODIFIERS = new Set([
   'large', 'small', 'medium', 'mini', 'jumbo', 'thick', 'thin', 'long', 'short',
   'grain', 'long grain', 'short grain', 'whole grain', 'ground',
   'mixed', 'assorted', 'other', 'misc', 'miscellaneous', 'generic', 'instant',
+  'all', 'class', 'classes', 'various', 'total', 'composite',
+  // Cooking methods and coatings. These stay usable in combinations, where they
+  // name real dishes ("fried chicken"), but alone they drift: "breaded" resolves
+  // to Bread crumbs and "fried" to Frying.
+  'fried', 'breaded', 'battered', 'crumbed', 'grilled', 'smoked', 'stewed', 'stewing',
+  'roasting', 'broiled', 'poached', 'braised', 'sauteed', 'glazed', 'marinated',
+  'pickled', 'candied', 'creamed', 'mashed', 'shredded', 'minced', 'meatless',
   'sweet', 'sour', 'salty', 'spicy', 'mild', 'soft', 'hard', 'crisp', 'creamy',
   'reduced', 'free', 'extra', 'double', 'single', 'style', 'type', 'variety', 'flavored',
 ]);
@@ -157,7 +164,19 @@ export function buildSearchCandidates(raw: string): string[] {
   };
 
   const base = segments[0];
-  const detail = segments.slice(1).filter((segment) => !isQualifierSegment(segment));
+
+  // Some entries are recipe descriptions rather than names ("seven-layer salad,
+  // lettuce salad made with a combination of onion, celery, ..."). Their later
+  // segments are ingredients, so searching them finds the ingredient (mayonnaise)
+  // instead of the dish; the leading name is all that is meaningful.
+  const isIngredientList =
+    /\band or\b|\bmade with\b|\bcombination of\b/.test(normalized) ||
+    segments.length > 5 ||
+    normalized.length > 70;
+
+  const detail = isIngredientList
+    ? []
+    : segments.slice(1).filter((segment) => !isQualifierSegment(segment));
 
   if (detail.length) {
     add(`${detail[detail.length - 1]} ${base}`);
@@ -193,10 +212,10 @@ export function buildSearchCandidates(raw: string): string[] {
 }
 
 /**
- * Articles whose lead image is the live animal, the growing crop, or a farming
- * scene rather than something edible — "Chicken as food" leads with chickens in a
- * market, "Rice" with a paddy field. The curated catalog has a proper plated photo
- * for all of these, so a hit here is rejected in favour of the category image.
+ * Articles that *are* about food — so the category check passes them — but whose
+ * lead image is the live animal, the growing crop, or a farming scene: "Chicken as
+ * food" leads with chickens in a market, "Rice" with a paddy field. The curated
+ * catalog has a proper plated photo for each, so these fall back to it.
  */
 const UNAPPETISING_ARTICLES = new Set([
   'Chicken',
@@ -280,12 +299,17 @@ interface WikipediaThumbnail {
   article: string;
 }
 
-/** One batched pageimages call. Returns requested-title -> thumbnail. */
+/**
+ * One batched pageimages call.
+ *
+ * `ok` distinguishes "Wikipedia said there is no such article" from "the request
+ * failed", which matters because only the former is a real answer worth caching.
+ */
 async function fetchWikipediaThumbnails(
   titles: string[]
-): Promise<Map<string, WikipediaThumbnail>> {
+): Promise<{ results: Map<string, WikipediaThumbnail>; ok: boolean }> {
   const results = new Map<string, WikipediaThumbnail>();
-  if (!titles.length) return results;
+  if (!titles.length) return { results, ok: true };
 
   const params = new URLSearchParams({
     action: 'query',
@@ -307,7 +331,7 @@ async function fetchWikipediaThumbnails(
       headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' },
       signal: controller.signal,
     });
-    if (!res.ok) return results;
+    if (!res.ok) return { results, ok: false };
 
     const json = (await res.json()) as WikipediaResponse;
 
@@ -334,12 +358,82 @@ async function fetchWikipediaThumbnails(
       if (url) results.set(requested, { url, article });
     }
   } catch {
-    // Timeout, DNS, or malformed payload — fall through to no results.
+    return { results, ok: false };
   } finally {
     clearTimeout(timer);
   }
 
-  return results;
+  return { results, ok: true };
+}
+
+/**
+ * Category names that mean an article is about something edible. Wikipedia titles
+ * are not food-scoped, so a term taken from a food name lands wherever it lands:
+ * "chicken, back" reaches Human back and "chicken, liver" reaches the organ. Asking
+ * what an article is *categorised* as rejects those without having to enumerate
+ * every wrong answer in advance.
+ */
+const FOOD_CATEGORY_PATTERN =
+  /food|cuisine|dish|cook|bak|dessert|confection|beverage|drink|soup|stew|salad|snack|bread|cake|pastr|\bpie|cheese|meat|seafood|poultry|vegetable|fruit|rice|pasta|noodle|dumpling|flour|grain|cereal|legume|bean|nut|spice|condiment|sauce|breakfast|sandwich|candy|chocolate|dairy|milk|egg|offal|giblet|sausage|cured|fermented|staple|brand|drinks/i;
+
+interface CategoriesResponse {
+  query?: {
+    pages?: Array<{ title?: string; categories?: Array<{ title?: string }> }>;
+  };
+}
+
+/**
+ * Narrows a set of articles to those categorised as food.
+ *
+ * Returns undefined when the check could not be made, which callers treat as
+ * "unknown" rather than "not food" — a Wikipedia hiccup should not strip images
+ * that were resolving correctly a minute ago.
+ */
+async function selectFoodArticles(articles: string[]): Promise<Set<string> | undefined> {
+  if (!articles.length) return new Set();
+
+  const foodArticles = new Set<string>();
+  let checked = false;
+
+  for (const batch of chunk(articles, MAX_TITLES_PER_QUERY)) {
+    const params = new URLSearchParams({
+      action: 'query',
+      format: 'json',
+      formatversion: '2',
+      prop: 'categories',
+      cllimit: 'max',
+      clshow: '!hidden',
+      titles: batch.join('|'),
+    });
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), getLookupTimeoutMs());
+
+    try {
+      const res = await fetch(`${WIKIPEDIA_API}?${params}`, {
+        headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' },
+        signal: controller.signal,
+      });
+      if (!res.ok) continue;
+
+      const json = (await res.json()) as CategoriesResponse;
+      checked = true;
+
+      for (const page of json.query?.pages ?? []) {
+        if (!page.title) continue;
+        const isFood = (page.categories ?? []).some((category) =>
+          FOOD_CATEGORY_PATTERN.test(category.title ?? '')
+        );
+        if (isFood) foodArticles.add(page.title);
+      }
+    } catch {
+      // Timeout or malformed payload — leave this batch unverified.
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  return checked ? foodArticles : undefined;
 }
 
 function chunk<T>(items: T[], size: number): T[][] {
@@ -522,10 +616,23 @@ export async function resolveFoodImageEntries(
   }
 
   const thumbnails = new Map<string, WikipediaThumbnail>();
+  let lookupComplete = true;
+
   for (const batch of chunk(Array.from(titles), MAX_TITLES_PER_QUERY)) {
-    const found = await fetchWikipediaThumbnails(batch);
+    const { results: found, ok } = await fetchWikipediaThumbnails(batch);
     for (const [title, thumbnail] of found) thumbnails.set(title, thumbnail);
+    if (!ok) lookupComplete = false;
   }
+
+  // One extra call confirms the articles that matched are actually about food.
+  const hitArticles = Array.from(new Set(Array.from(thumbnails.values(), (hit) => hit.article)));
+  const foodArticles = await selectFoodArticles(hitArticles);
+  if (!foodArticles) lookupComplete = false;
+
+  const isUsable = (hit: WikipediaThumbnail): boolean => {
+    if (UNAPPETISING_ARTICLES.has(hit.article)) return false;
+    return foodArticles ? foodArticles.has(hit.article) : true;
+  };
 
   const toCache: Array<{ key: string; imageUrl?: string; source: string }> = [];
 
@@ -535,22 +642,30 @@ export async function resolveFoodImageEntries(
 
     for (const candidate of plan?.lookupCandidates ?? []) {
       const hit = thumbnails.get(toWikipediaTitle(candidate));
-      if (hit && !UNAPPETISING_ARTICLES.has(hit.article)) {
+      if (hit && isUsable(hit)) {
         imageUrl = hit.url;
         break;
       }
     }
 
-    const key = cacheKey(name);
-    // Only the lookup outcome is cached; the curated fallback is applied on read
-    // so catalog edits take effect without waiting for the cache to expire.
-    writeMemo(key, imageUrl);
-    toCache.push({ key, imageUrl, source: imageUrl ? 'wikipedia' : 'none' });
+    // Only a complete lookup is a real answer. Persisting a partial one would pin
+    // a wrong image, or a needless fallback, for the lifetime of the cache entry.
+    if (lookupComplete) {
+      const key = cacheKey(name);
+      // Only the lookup outcome is cached; the curated fallback is applied on read
+      // so catalog edits take effect without waiting for the cache to expire.
+      writeMemo(key, imageUrl);
+      toCache.push({ key, imageUrl, source: imageUrl ? 'wikipedia' : 'none' });
+    }
 
     if (imageUrl) resolved.set(name, { imageUrl });
     else if (plan?.curated) {
       resolved.set(name, { imageUrl: plan.curated });
     }
+  }
+
+  if (!lookupComplete) {
+    console.log('[food-image] lookup incomplete, not caching this batch');
   }
 
   try {
