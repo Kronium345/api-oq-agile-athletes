@@ -10,6 +10,7 @@
  * Resolution is strictly best-effort: every failure path degrades to "no image"
  * so that a slow or broken image source can never fail a food search.
  */
+import { Readable } from 'node:stream';
 import {
   CURATED_FOOD_IMAGES,
   CURATED_FOOD_KEYS_BY_SPECIFICITY,
@@ -121,20 +122,25 @@ const CURATED_KEY_PATTERNS = CURATED_FOOD_KEYS_BY_SPECIFICITY.map((key) => ({
 }));
 
 /** Curated tier: exact key, then longest-first word-boundary match. */
-export function findCuratedImage(raw: string): string | undefined {
+export function findCuratedImageKey(raw: string): string | undefined {
   const candidates = buildSearchCandidates(raw);
 
   for (const candidate of candidates) {
-    if (CURATED_FOOD_IMAGES[candidate]) return CURATED_FOOD_IMAGES[candidate];
+    if (CURATED_FOOD_IMAGES[candidate]) return candidate;
   }
 
   for (const candidate of candidates) {
     for (const { key, pattern } of CURATED_KEY_PATTERNS) {
-      if (pattern.test(candidate)) return CURATED_FOOD_IMAGES[key];
+      if (pattern.test(candidate)) return key;
     }
   }
 
   return undefined;
+}
+
+export function findCuratedImage(raw: string): string | undefined {
+  const key = findCuratedImageKey(raw);
+  return key ? CURATED_FOOD_IMAGES[key] : undefined;
 }
 
 function toWikipediaTitle(term: string): string {
@@ -348,7 +354,7 @@ export async function resolveFoodImages(names: string[]): Promise<Map<string, st
   return resolved;
 }
 
-/** Single-name convenience wrapper. */
+/** Single-name convenience wrapper. Returns the upstream URL. */
 export async function resolveFoodImage(name: string): Promise<string | undefined> {
   if (!name?.trim()) return undefined;
   const resolved = await resolveFoodImages([name]);
@@ -356,24 +362,104 @@ export async function resolveFoodImage(name: string): Promise<string | undefined
 }
 
 /**
- * Attaches `imageUrl` to items that have a resolvable image, leaving the
- * original objects untouched.
+ * Path of the image proxy route, relative to the API root. The app prepends its
+ * SERVER_URL, mirroring how exercise GIF URLs are handled.
+ */
+export const FOOD_IMAGE_PROXY_PATH = '/foodScan/image';
+
+/**
+ * Curated hits are addressed by category so that every food mapping to the same
+ * picture shares one URL — all the "pizza, ..." variants in a search then cost a
+ * single image download instead of one each. Long-tail hits fall back to the name.
+ */
+export function buildFoodImageProxyPath(name: string): string {
+  const curatedKey = findCuratedImageKey(name);
+  return curatedKey
+    ? `${FOOD_IMAGE_PROXY_PATH}?key=${encodeURIComponent(curatedKey)}`
+    : `${FOOD_IMAGE_PROXY_PATH}?name=${encodeURIComponent(name.trim())}`;
+}
+
+/**
+ * Same as resolveFoodImages, but returns proxy paths instead of upstream URLs.
+ *
+ * Upstream hosts are never handed to the client: Wikimedia answers 403 to the
+ * User-Agent that React Native's Android image loader sends, so images have to be
+ * streamed through this API instead (see the /foodScan/image route).
+ */
+export async function resolveFoodImageRefs(names: string[]): Promise<Map<string, string>> {
+  const refs = new Map<string, string>();
+
+  // Curated names need no lookup at all, so only the rest reach resolveFoodImages.
+  const unresolved: string[] = [];
+  for (const name of names) {
+    const trimmed = typeof name === 'string' ? name.trim() : '';
+    if (!trimmed || refs.has(trimmed)) continue;
+
+    if (findCuratedImageKey(trimmed)) {
+      refs.set(trimmed, buildFoodImageProxyPath(trimmed));
+    } else {
+      unresolved.push(trimmed);
+    }
+  }
+
+  if (unresolved.length) {
+    const upstream = await resolveFoodImages(unresolved);
+    for (const name of upstream.keys()) {
+      refs.set(name, buildFoodImageProxyPath(name));
+    }
+  }
+
+  return refs;
+}
+
+export async function resolveFoodImageRef(name: string): Promise<string | undefined> {
+  const refs = await resolveFoodImageRefs([name]);
+  return refs.get(name?.trim());
+}
+
+/**
+ * Attaches a proxied `imageUrl` to items that have a resolvable image, leaving
+ * the original objects untouched.
  */
 export async function attachFoodImages<T extends { name: string; imageUrl?: string }>(
   items: T[]
 ): Promise<T[]> {
   if (!items.length) return items;
 
-  const missing = items.filter((item) => !sanitizeImageUrl(item.imageUrl)).map((item) => item.name);
-  if (!missing.length) return items;
-
-  const resolved = await resolveFoodImages(missing);
+  const refs = await resolveFoodImageRefs(items.map((item) => item.name));
+  if (!refs.size) return items;
 
   return items.map((item) => {
-    const existing = sanitizeImageUrl(item.imageUrl);
-    if (existing) return { ...item, imageUrl: existing };
-
-    const imageUrl = resolved.get(item.name?.trim());
+    const imageUrl = refs.get(item.name?.trim());
     return imageUrl ? { ...item, imageUrl } : item;
   });
+}
+
+/**
+ * Fetches the upstream thumbnail for a food name as a stream, for the image proxy
+ * route. Sends a descriptive User-Agent because Wikimedia rejects generic ones.
+ */
+export async function openFoodImageStream(params: {
+  name?: string;
+  key?: string;
+}): Promise<{
+  stream: NodeJS.ReadableStream;
+  contentType: string;
+} | null> {
+  const upstream = params.key
+    ? CURATED_FOOD_IMAGES[params.key]
+    : params.name
+      ? await resolveFoodImage(params.name)
+      : undefined;
+  if (!upstream) return null;
+
+  const res = await fetch(upstream, {
+    headers: { 'User-Agent': USER_AGENT, Accept: 'image/*' },
+  });
+  if (!res.ok || !res.body) return null;
+
+  return {
+    stream: Readable.fromWeb(res.body as Parameters<typeof Readable.fromWeb>[0]),
+    contentType: res.headers.get('content-type') || 'image/jpeg',
+  };
 }

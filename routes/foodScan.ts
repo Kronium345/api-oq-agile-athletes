@@ -23,8 +23,8 @@ import {
 import { buildFoodScanApiPayload } from '../services/foodScanResponse.ts';
 import {
   attachFoodImages,
-  resolveFoodImages,
-  sanitizeImageUrl,
+  openFoodImageStream,
+  resolveFoodImageRefs,
 } from '../services/foodImageService.ts';
 import {
   foodAnalysisErrorToHttp,
@@ -53,7 +53,8 @@ function mapFoodItemsForResponse(
   return items.map((item) => ({
     ...item,
     nutrients: item.nutrients ? nutrientsWithAliases(item.nutrients) : null,
-    imageUrl: sanitizeImageUrl(item.imageUrl) ?? images?.get(item.name?.trim()),
+    // Always the proxy path, overriding any upstream URL stored on older scans.
+    imageUrl: images?.get(item.name?.trim()),
   }));
 }
 
@@ -67,13 +68,13 @@ function mapScanForResponse(scan: ScanDocument, images?: Map<string, string>) {
 }
 
 /**
- * Scans saved before food images existed have no `imageUrl`, so thumbnails are
- * backfilled on read. Images for every item across every scan are resolved in a
+ * Thumbnails are derived from the food name on read, so scans saved before food
+ * images existed get one too. Every item across every scan is resolved in a
  * single batch to keep this to one lookup per request.
  */
 async function mapScansForResponse(scans: ScanDocument[]) {
   const names = scans.flatMap((scan) => scan?.foodItems?.map((item) => item.name) ?? []);
-  const images = await resolveFoodImages(names);
+  const images = await resolveFoodImageRefs(names);
   return scans.map((scan) => mapScanForResponse(scan, images));
 }
 
@@ -95,10 +96,10 @@ async function attachAnalysisImages<
     ...analysis.alternates,
     ...analysis.foodItems,
   ];
-  const images = await resolveFoodImages(items.map((item) => item.name));
+  const images = await resolveFoodImageRefs(items.map((item) => item.name));
 
   const withImage = <I extends FoodItemWithNutrition>(item: I): I => {
-    const imageUrl = sanitizeImageUrl(item.imageUrl) ?? images.get(item.name?.trim());
+    const imageUrl = images.get(item.name?.trim());
     return imageUrl ? { ...item, imageUrl } : item;
   };
 
@@ -133,6 +134,42 @@ router.post('/', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * Streams a food thumbnail through this API.
+ *
+ * Upstream hosts are not usable directly from the app: Wikimedia answers 403 to
+ * the User-Agent React Native's Android image loader sends. This mirrors the
+ * exercise GIF proxy so the client only ever loads images from our own origin.
+ *
+ * Declared before the `/:userId` routes so it is not swallowed by them.
+ */
+router.get('/image', async (req: Request, res: Response) => {
+  const key = typeof req.query.key === 'string' ? req.query.key.trim() : '';
+  const name = typeof req.query.name === 'string' ? req.query.name.trim() : '';
+
+  if (!key && !name) {
+    return res.status(400).json({ message: 'Query parameter key or name is required' });
+  }
+
+  try {
+    const image = await openFoodImageStream({ key, name });
+    if (!image) {
+      // No image for this food — the client falls back to its placeholder tile.
+      return res.status(404).json({ message: 'No image for that food' });
+    }
+
+    res.setHeader('Content-Type', image.contentType);
+    res.setHeader('Cache-Control', 'public, max-age=604800');
+    image.stream.pipe(res);
+  } catch (error: unknown) {
+    const err = error as Error;
+    console.log(`[food-image] proxy failed for ${key || name}:`, err.message);
+    if (!res.headersSent) {
+      res.status(404).json({ message: 'Image not available' });
+    }
+  }
+});
+
 router.get('/search', async (req: Request, res: Response) => {
   try {
     const query = typeof req.query.q === 'string' ? req.query.q : req.query.query;
@@ -142,7 +179,7 @@ router.get('/search', async (req: Request, res: Response) => {
 
     const limit = Math.min(Number(req.query.limit) || 8, 20);
     const results = await searchFoodNutrition(String(query).trim(), limit);
-    const images = await resolveFoodImages(results.map((r) => r.name));
+    const images = await resolveFoodImageRefs(results.map((r) => r.name));
 
     return res.status(200).json({
       query: String(query).trim(),
@@ -150,7 +187,7 @@ router.get('/search', async (req: Request, res: Response) => {
         name: r.name,
         fdcId: r.fdcId,
         nutrients: r.nutrients,
-        imageUrl: sanitizeImageUrl(r.imageUrl) ?? images.get(r.name.trim()),
+        imageUrl: images.get(r.name.trim()),
       })),
     });
   } catch (error: unknown) {
@@ -332,7 +369,7 @@ router.get('/scans/last-three-days', async (req: Request, res: Response) => {
     }
 
     // One image lookup covering all three days rather than one per day.
-    const images = await resolveFoodImages(
+    const images = await resolveFoodImageRefs(
       days.flatMap((day) => day.scans.flatMap((scan) => scan?.foodItems?.map((i) => i.name) ?? []))
     );
 
