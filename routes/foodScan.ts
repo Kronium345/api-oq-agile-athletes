@@ -144,15 +144,15 @@ router.post('/', async (req: Request, res: Response) => {
  * Declared before the `/:userId` routes so it is not swallowed by them.
  */
 router.get('/image', async (req: Request, res: Response) => {
-  const key = typeof req.query.key === 'string' ? req.query.key.trim() : '';
+  const src = typeof req.query.src === 'string' ? req.query.src.trim() : '';
   const name = typeof req.query.name === 'string' ? req.query.name.trim() : '';
 
-  if (!key && !name) {
-    return res.status(400).json({ message: 'Query parameter key or name is required' });
+  if (!src && !name) {
+    return res.status(400).json({ message: 'Query parameter src or name is required' });
   }
 
   try {
-    const image = await openFoodImageStream({ key, name });
+    const image = await openFoodImageStream({ src, name });
     if (!image) {
       // No image for this food — the client falls back to its placeholder tile.
       return res.status(404).json({ message: 'No image for that food' });
@@ -163,7 +163,7 @@ router.get('/image', async (req: Request, res: Response) => {
     image.stream.pipe(res);
   } catch (error: unknown) {
     const err = error as Error;
-    console.log(`[food-image] proxy failed for ${key || name}:`, err.message);
+    console.log(`[food-image] proxy failed for ${name || src}:`, err.message);
     if (!res.headersSent) {
       res.status(404).json({ message: 'Image not available' });
     }

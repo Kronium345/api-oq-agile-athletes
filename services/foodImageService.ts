@@ -24,6 +24,12 @@ const WIKIPEDIA_API = 'https://en.wikipedia.org/w/api.php';
 const THUMB_SIZE = 320;
 const MAX_TITLES_PER_QUERY = 40;
 
+/**
+ * Candidates tried per food. Every candidate for every food goes into the same
+ * batched request, so a larger number costs URL length rather than round trips.
+ */
+const MAX_LOOKUP_CANDIDATES = 6;
+
 /** Wikimedia asks API clients to identify themselves. */
 const USER_AGENT =
   process.env.FOOD_IMAGE_USER_AGENT?.trim() ||
@@ -66,7 +72,20 @@ function stripQualifierWords(segment: string): string {
   return kept.join(' ').trim();
 }
 
-/** Cache key: lowercase, punctuation-free, whitespace-collapsed. */
+/**
+ * Bumped whenever candidate generation changes. Cached entries record what a
+ * lookup found, including misses, so without a version a smarter algorithm would
+ * keep serving the old answer until the TTL expired.
+ */
+const LOOKUP_VERSION = 'v5';
+
+/** Cache/memo key for a food name, scoped to the candidate algorithm version. */
+function cacheKey(raw: string): string {
+  const normalized = normalizeFoodName(raw);
+  return normalized ? `${LOOKUP_VERSION}:${normalized}` : '';
+}
+
+/** Normalized form: lowercase, punctuation-free, whitespace-collapsed. */
 export function normalizeFoodName(raw: string): string {
   return raw
     .toLowerCase()
@@ -77,8 +96,47 @@ export function normalizeFoodName(raw: string): string {
 }
 
 /**
- * Turns one food name into search terms ordered most-specific first.
- * "pasta with sauce, nfs" -> ["pasta with sauce", "pasta"]
+ * Words that describe a food rather than name one, so they must never be searched
+ * alone: "rice, white" would otherwise look up the colour White.
+ */
+const NON_DISH_MODIFIERS = new Set([
+  'white', 'brown', 'green', 'yellow', 'black', 'blue', 'dark', 'light', 'pale', 'golden',
+  'large', 'small', 'medium', 'mini', 'jumbo', 'thick', 'thin', 'long', 'short',
+  'grain', 'long grain', 'short grain', 'whole grain', 'ground',
+  'mixed', 'assorted', 'other', 'misc', 'miscellaneous', 'generic', 'instant',
+  'sweet', 'sour', 'salty', 'spicy', 'mild', 'soft', 'hard', 'crisp', 'creamy',
+  'reduced', 'free', 'extra', 'double', 'single', 'style', 'type', 'variety', 'flavored',
+]);
+
+/** A segment that only describes preparation is no help in naming a dish. */
+function isQualifierSegment(segment: string): boolean {
+  const words = segment.split(' ').filter(Boolean);
+  return words.length > 0 && words.every((word) => QUALIFIER_WORDS.has(word));
+}
+
+/**
+ * Whether a segment can be searched on its own. A single describing word is enough
+ * to make it something other than a dish: "chinese restaurant" finds a photo of a
+ * restaurant interior, not of food.
+ */
+function isSearchableAlone(segment: string): boolean {
+  if (segment.length < 4) return false;
+
+  const words = segment.split(' ').filter(Boolean);
+  return words.every((word) => !QUALIFIER_WORDS.has(word) && !NON_DISH_MODIFIERS.has(word));
+}
+
+/** "pasta with sauce" / "chicken and rice" -> "pasta" / "chicken" */
+function headOf(value: string): string {
+  return value.split(/\s+(?:with|without|and|in|on|from)\s+/)[0];
+}
+
+/**
+ * Turns one food name into search terms ordered most-promising first.
+ *
+ * Nutrition providers list foods category-first ("soup, tomato"), which is not how
+ * dishes are named in English and matches nothing. Reversing the segments recovers
+ * the real name ("tomato soup"), which is what makes per-dish images possible.
  */
 export function buildSearchCandidates(raw: string): string[] {
   const normalized = normalizeFoodName(raw);
@@ -98,22 +156,70 @@ export function buildSearchCandidates(raw: string): string[] {
     }
   };
 
+  const base = segments[0];
+  const detail = segments.slice(1).filter((segment) => !isQualifierSegment(segment));
+
+  if (detail.length) {
+    add(`${detail[detail.length - 1]} ${base}`);
+    add(`${base} ${detail[0]}`);
+    add(`${detail[0]} ${base}`);
+
+    // A dish often stands alone under its own name: "soup, pozole" -> Pozole.
+    for (let i = detail.length - 1; i >= 0; i -= 1) {
+      if (isSearchableAlone(detail[i])) add(detail[i]);
+    }
+  }
+
+  // "macaroni or pasta salad with egg" — the dish usually sits in the last
+  // alternative, the earlier ones being a broader synonym.
+  if (base.includes(' or ')) {
+    for (const alternative of base.split(' or ').reverse()) {
+      add(alternative);
+      add(headOf(alternative));
+    }
+  }
+
   // Progressively drop trailing comma segments: most detail first, base food last.
   for (let count = segments.length; count >= 1; count -= 1) {
     add(segments.slice(0, count).join(' '));
   }
 
-  const base = segments[0];
   add(base);
   add(stripQualifierWords(base));
-
-  // "pasta with sauce" / "chicken and rice" -> "pasta" / "chicken"
-  const head = base.split(/\s+(?:with|without|and|in|on|from)\s+/)[0];
-  add(head);
-  add(stripQualifierWords(head));
+  add(headOf(base));
+  add(stripQualifierWords(headOf(base)));
 
   return candidates;
 }
+
+/**
+ * Articles whose lead image is the live animal, the growing crop, or a farming
+ * scene rather than something edible — "Chicken as food" leads with chickens in a
+ * market, "Rice" with a paddy field. The curated catalog has a proper plated photo
+ * for all of these, so a hit here is rejected in favour of the category image.
+ */
+const UNAPPETISING_ARTICLES = new Set([
+  'Chicken',
+  'Chicken as food',
+  'Poultry',
+  'Poultry farming',
+  'Cattle',
+  'Livestock',
+  'Pig',
+  'Domestic pig',
+  'Sheep',
+  'Goat',
+  'Rice',
+  'Hybrid rice',
+  'Maize',
+  'Wheat',
+  'Oat',
+  'Barley',
+  'Soybean',
+  'Fish',
+  'Fishing',
+  'Aquaculture',
+]);
 
 const CURATED_KEY_PATTERNS = CURATED_FOOD_KEYS_BY_SPECIFICITY.map((key) => ({
   key,
@@ -168,9 +274,17 @@ interface WikipediaResponse {
   };
 }
 
-/** One batched pageimages call. Returns requested-title -> thumbnail URL. */
-async function fetchWikipediaThumbnails(titles: string[]): Promise<Map<string, string>> {
-  const results = new Map<string, string>();
+interface WikipediaThumbnail {
+  url: string;
+  /** Article the title actually resolved to, after normalization and redirects. */
+  article: string;
+}
+
+/** One batched pageimages call. Returns requested-title -> thumbnail. */
+async function fetchWikipediaThumbnails(
+  titles: string[]
+): Promise<Map<string, WikipediaThumbnail>> {
+  const results = new Map<string, WikipediaThumbnail>();
   if (!titles.length) return results;
 
   const params = new URLSearchParams({
@@ -197,20 +311,27 @@ async function fetchWikipediaThumbnails(titles: string[]): Promise<Map<string, s
 
     const json = (await res.json()) as WikipediaResponse;
 
-    // Map the page Wikipedia actually returned back to the title we asked for.
-    const aliases = new Map<string, string>();
-    for (const entry of json.query?.normalized ?? []) aliases.set(entry.to, entry.from);
-    for (const entry of json.query?.redirects ?? []) aliases.set(entry.to, entry.from);
+    // Follow requested -> resolved, never the reverse: several titles can redirect
+    // to one article, so a reverse map would drop all but one and hand an image to
+    // the wrong food.
+    const resolvesTo = new Map<string, string>();
+    for (const entry of json.query?.normalized ?? []) resolvesTo.set(entry.from, entry.to);
+    for (const entry of json.query?.redirects ?? []) resolvesTo.set(entry.from, entry.to);
 
+    const imageOfArticle = new Map<string, string>();
     for (const page of json.query?.pages ?? []) {
       const source = page.thumbnail?.source;
-      if (!source || !page.title) continue;
+      if (source && page.title) imageOfArticle.set(page.title, stripTrackingParams(source));
+    }
 
-      let title = page.title;
-      for (let i = 0; i < 5 && aliases.has(title); i += 1) {
-        title = aliases.get(title)!;
+    for (const requested of titles) {
+      let article = requested;
+      for (let i = 0; i < 5 && resolvesTo.has(article); i += 1) {
+        article = resolvesTo.get(article)!;
       }
-      results.set(title, stripTrackingParams(source));
+
+      const url = imageOfArticle.get(article);
+      if (url) results.set(requested, { url, article });
     }
   } catch {
     // Timeout, DNS, or malformed payload — fall through to no results.
@@ -245,12 +366,70 @@ function writeMemo(key: string, value: string | undefined): void {
   memo.set(key, value);
 }
 
+export interface FoodImagePlan {
+  /** Candidates worth a lookup, most specific first. Empty means "curated is best". */
+  lookupCandidates: string[];
+  /** Curated category image, used when no specific match is found. */
+  curated?: string;
+  /** Curated key, which addresses the shared proxy URL. */
+  curatedKey?: string;
+}
+
+/**
+ * Decides how one food name should be resolved.
+ *
+ * A curated match found via a *generic* candidate ("pasta" inside "pasta salad")
+ * is only a fallback: a lookup on the fuller name is tried first so that distinct
+ * dishes get distinct pictures. Names whose most specific form is itself a curated
+ * key need no lookup at all.
+ */
+export function planFoodImage(raw: string): FoodImagePlan {
+  const candidates = buildSearchCandidates(raw);
+  if (!candidates.length) return { lookupCandidates: [] };
+
+  // The name is itself a category ("pizza"), so the curated picture is already the
+  // best possible answer and no lookup can improve on it.
+  const exact = normalizeFoodName(raw);
+  if (CURATED_FOOD_IMAGES[exact]) {
+    return { lookupCandidates: [], curated: CURATED_FOOD_IMAGES[exact], curatedKey: exact };
+  }
+
+  const curatedKey = findCuratedImageKey(raw);
+
+  return {
+    // Anything at or below the curated key resolves to the same article, so only
+    // the more specific candidates can improve on it.
+    lookupCandidates: candidates
+      .filter((candidate) => candidate !== curatedKey)
+      .slice(0, MAX_LOOKUP_CANDIDATES),
+    curated: curatedKey ? CURATED_FOOD_IMAGES[curatedKey] : undefined,
+    curatedKey,
+  };
+}
+
 /**
  * Resolves thumbnails for many food names at once.
  * Never throws — names with no image are simply absent from the result.
  */
 export async function resolveFoodImages(names: string[]): Promise<Map<string, string>> {
+  const entries = await resolveFoodImageEntries(names);
   const resolved = new Map<string, string>();
+  for (const [name, entry] of entries) resolved.set(name, entry.imageUrl);
+  return resolved;
+}
+
+interface ResolvedFoodImage {
+  imageUrl: string;
+}
+
+/**
+ * Resolves thumbnails for many food names at once, preferring a dish-specific
+ * picture over the food's category image. Never throws.
+ */
+export async function resolveFoodImageEntries(
+  names: string[]
+): Promise<Map<string, ResolvedFoodImage>> {
+  const resolved = new Map<string, ResolvedFoodImage>();
   if (!isEnabled()) return resolved;
 
   const unique = Array.from(
@@ -258,32 +437,54 @@ export async function resolveFoodImages(names: string[]): Promise<Map<string, st
   );
   if (!unique.length) return resolved;
 
+  const plans = new Map<string, FoodImagePlan>();
   const pending: string[] = [];
 
   // Tier 1 — curated map and in-process memo.
   for (const name of unique) {
-    const curated = findCuratedImage(name);
-    if (curated) {
-      resolved.set(name, curated);
+    const plan = planFoodImage(name);
+    plans.set(name, plan);
+
+    const useCurated = () => {
+      if (plan.curated) {
+        resolved.set(name, { imageUrl: plan.curated });
+      }
+    };
+
+    if (!plan.lookupCandidates.length) {
+      useCurated();
       continue;
     }
 
-    const key = normalizeFoodName(name);
-    if (!key) continue;
+    const key = cacheKey(name);
+    if (!key) {
+      useCurated();
+      continue;
+    }
 
     const memoized = readMemo(key);
     if (memoized.hit) {
-      if (memoized.value) resolved.set(name, memoized.value);
+      if (memoized.value) resolved.set(name, { imageUrl: memoized.value });
+      else useCurated();
       continue;
     }
 
     pending.push(name);
   }
 
-  if (!pending.length || !isLookupEnabled()) return resolved;
+  if (!pending.length || !isLookupEnabled()) {
+    // Lookups disabled — everything outstanding falls back to its category image.
+    for (const name of pending) {
+      const plan = plans.get(name);
+      if (plan?.curated) {
+        resolved.set(name, { imageUrl: plan.curated });
+      }
+    }
+    return resolved;
+  }
 
   // Tier 2 — Mongo cache.
-  const pendingKeys = pending.map((name) => normalizeFoodName(name));
+  const pendingKeys = pending.map((name) => cacheKey(name));
   let cached = new Map<string, string | undefined>();
   try {
     cached = await readCachedFoodImages(Array.from(new Set(pendingKeys)));
@@ -294,11 +495,16 @@ export async function resolveFoodImages(names: string[]): Promise<Map<string, st
 
   const stillPending: string[] = [];
   for (const name of pending) {
-    const key = normalizeFoodName(name);
+    const key = cacheKey(name);
+    const plan = plans.get(name);
+
     if (cached.has(key)) {
       const value = cached.get(key);
       writeMemo(key, value);
-      if (value) resolved.set(name, value);
+      if (value) resolved.set(name, { imageUrl: value });
+      else if (plan?.curated) {
+        resolved.set(name, { imageUrl: plan.curated });
+      }
       continue;
     }
     stillPending.push(name);
@@ -308,41 +514,43 @@ export async function resolveFoodImages(names: string[]): Promise<Map<string, st
 
   // Tier 3 — batched Wikimedia lookup. Query every candidate for every
   // outstanding name in one go, then pick each name's most specific hit.
-  const candidatesByName = new Map<string, string[]>();
   const titles = new Set<string>();
-
   for (const name of stillPending) {
-    const candidates = buildSearchCandidates(name).slice(0, 3);
-    candidatesByName.set(name, candidates);
-    for (const candidate of candidates) titles.add(toWikipediaTitle(candidate));
+    for (const candidate of plans.get(name)?.lookupCandidates ?? []) {
+      titles.add(toWikipediaTitle(candidate));
+    }
   }
 
-  const thumbnails = new Map<string, string>();
+  const thumbnails = new Map<string, WikipediaThumbnail>();
   for (const batch of chunk(Array.from(titles), MAX_TITLES_PER_QUERY)) {
     const found = await fetchWikipediaThumbnails(batch);
-    for (const [title, url] of found) thumbnails.set(title, url);
+    for (const [title, thumbnail] of found) thumbnails.set(title, thumbnail);
   }
 
   const toCache: Array<{ key: string; imageUrl?: string; source: string }> = [];
 
   for (const name of stillPending) {
-    const candidates = candidatesByName.get(name) ?? [];
+    const plan = plans.get(name);
     let imageUrl: string | undefined;
 
-    for (const candidate of candidates) {
+    for (const candidate of plan?.lookupCandidates ?? []) {
       const hit = thumbnails.get(toWikipediaTitle(candidate));
-      if (hit) {
-        imageUrl = hit;
+      if (hit && !UNAPPETISING_ARTICLES.has(hit.article)) {
+        imageUrl = hit.url;
         break;
       }
     }
 
-    const key = normalizeFoodName(name);
+    const key = cacheKey(name);
+    // Only the lookup outcome is cached; the curated fallback is applied on read
+    // so catalog edits take effect without waiting for the cache to expire.
     writeMemo(key, imageUrl);
-    if (imageUrl) resolved.set(name, imageUrl);
-
-    // Cache misses too, so an obscure name is not looked up on every search.
     toCache.push({ key, imageUrl, source: imageUrl ? 'wikipedia' : 'none' });
+
+    if (imageUrl) resolved.set(name, { imageUrl });
+    else if (plan?.curated) {
+      resolved.set(name, { imageUrl: plan.curated });
+    }
   }
 
   try {
@@ -367,16 +575,37 @@ export async function resolveFoodImage(name: string): Promise<string | undefined
  */
 export const FOOD_IMAGE_PROXY_PATH = '/foodScan/image';
 
+/** Hosts the proxy will fetch from. Anything else is rejected, so `src` cannot be
+ * turned into an open proxy. */
+const ALLOWED_IMAGE_HOSTS = new Set(['upload.wikimedia.org']);
+
 /**
- * Curated hits are addressed by category so that every food mapping to the same
- * picture shares one URL — all the "pizza, ..." variants in a search then cost a
- * single image download instead of one each. Long-tail hits fall back to the name.
+ * Proxy URLs are content-addressed by their upstream URL rather than by food name,
+ * so foods that share a picture also share one cacheable URL: a search returning
+ * eight "macaroni or pasta salad ..." rows costs a single image download.
  */
-export function buildFoodImageProxyPath(name: string): string {
-  const curatedKey = findCuratedImageKey(name);
-  return curatedKey
-    ? `${FOOD_IMAGE_PROXY_PATH}?key=${encodeURIComponent(curatedKey)}`
-    : `${FOOD_IMAGE_PROXY_PATH}?name=${encodeURIComponent(name.trim())}`;
+export function buildFoodImageProxyPath(upstreamUrl: string): string {
+  const src = Buffer.from(upstreamUrl, 'utf8').toString('base64url');
+  return `${FOOD_IMAGE_PROXY_PATH}?src=${src}`;
+}
+
+/** Decodes a `src` parameter, returning undefined unless it is an allowed host. */
+export function decodeFoodImageSrc(src: string): string | undefined {
+  let decoded: string;
+  try {
+    decoded = Buffer.from(src, 'base64url').toString('utf8');
+  } catch {
+    return undefined;
+  }
+
+  try {
+    const parsed = new URL(decoded);
+    if (parsed.protocol !== 'https:') return undefined;
+    if (!ALLOWED_IMAGE_HOSTS.has(parsed.hostname)) return undefined;
+    return parsed.toString();
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -387,26 +616,11 @@ export function buildFoodImageProxyPath(name: string): string {
  * streamed through this API instead (see the /foodScan/image route).
  */
 export async function resolveFoodImageRefs(names: string[]): Promise<Map<string, string>> {
+  const entries = await resolveFoodImageEntries(names);
   const refs = new Map<string, string>();
 
-  // Curated names need no lookup at all, so only the rest reach resolveFoodImages.
-  const unresolved: string[] = [];
-  for (const name of names) {
-    const trimmed = typeof name === 'string' ? name.trim() : '';
-    if (!trimmed || refs.has(trimmed)) continue;
-
-    if (findCuratedImageKey(trimmed)) {
-      refs.set(trimmed, buildFoodImageProxyPath(trimmed));
-    } else {
-      unresolved.push(trimmed);
-    }
-  }
-
-  if (unresolved.length) {
-    const upstream = await resolveFoodImages(unresolved);
-    for (const name of upstream.keys()) {
-      refs.set(name, buildFoodImageProxyPath(name));
-    }
+  for (const [name, entry] of entries) {
+    refs.set(name, buildFoodImageProxyPath(entry.imageUrl));
   }
 
   return refs;
@@ -440,14 +654,14 @@ export async function attachFoodImages<T extends { name: string; imageUrl?: stri
  * route. Sends a descriptive User-Agent because Wikimedia rejects generic ones.
  */
 export async function openFoodImageStream(params: {
+  src?: string;
   name?: string;
-  key?: string;
 }): Promise<{
   stream: NodeJS.ReadableStream;
   contentType: string;
 } | null> {
-  const upstream = params.key
-    ? CURATED_FOOD_IMAGES[params.key]
+  const upstream = params.src
+    ? decodeFoodImageSrc(params.src)
     : params.name
       ? await resolveFoodImage(params.name)
       : undefined;
