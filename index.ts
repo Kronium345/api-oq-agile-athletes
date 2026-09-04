@@ -103,6 +103,19 @@ app.use('/performance', performanceRoutes);
 app.use('/recovery', recoveryRoutes);
 app.use('/uploads', express.static('uploads'));
 
+/**
+ * Food thumbnails, served from our own origin.
+ *
+ * Serving these ourselves is what makes them work on Android: Wikimedia answers 403
+ * to the User-Agent React Native's image loader sends, which is why these images had
+ * to be proxied while they lived upstream.
+ *
+ * Cached for a week with ETag revalidation rather than marked immutable, since the
+ * filenames are concept names and a rebuilt image reuses its path.
+ * Attribution for every file is in public/food-images/credits.json.
+ */
+app.use('/food-images', express.static('public/food-images', { maxAge: '7d' }));
+
 app.use((err: any, req: any, res: any, next: any) => {
   console.error('Error:', err);
   res.status(500).json({

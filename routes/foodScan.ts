@@ -21,11 +21,8 @@ import {
   type FoodItemWithNutrition,
 } from '../services/foodService.ts';
 import { buildFoodScanApiPayload } from '../services/foodScanResponse.ts';
-import {
-  attachFoodImages,
-  openFoodImageStream,
-  resolveFoodImageRefs,
-} from '../services/foodImageService.ts';
+import { openFoodImageStream } from '../services/foodImageService.ts';
+import { attachFoodImages, resolveFoodImageUrl } from '../services/foodImageResolver.ts';
 import {
   foodAnalysisErrorToHttp,
   isFoodAnalysisServiceError,
@@ -46,60 +43,47 @@ const router = express.Router();
 
 type ScanDocument = Awaited<ReturnType<typeof getFoodScanById>>;
 
-function mapFoodItemsForResponse(
-  items: FoodItemWithNutrition[],
-  images?: Map<string, string>
-) {
+function mapFoodItemsForResponse(items: FoodItemWithNutrition[]) {
   return items.map((item) => ({
     ...item,
     nutrients: item.nutrients ? nutrientsWithAliases(item.nutrients) : null,
-    // Always the proxy path, overriding any upstream URL stored on older scans.
-    imageUrl: images?.get(item.name?.trim()),
+    // Always the catalog path, overriding any upstream URL stored on older scans.
+    imageUrl: resolveFoodImageUrl(item.name) ?? null,
   }));
-}
-
-function mapScanForResponse(scan: ScanDocument, images?: Map<string, string>) {
-  if (!scan) return null;
-  const serialized = serializeScan(scan);
-  return {
-    ...serialized,
-    foodItems: mapFoodItemsForResponse(scan.foodItems, images),
-  };
 }
 
 /**
  * Thumbnails are derived from the food name on read, so scans saved before food
- * images existed get one too. Every item across every scan is resolved in a
- * single batch to keep this to one lookup per request.
+ * images existed get one too. The catalog lookup is in-process, so this costs
+ * nothing per item and needs no batching.
  */
-async function mapScansForResponse(scans: ScanDocument[]) {
-  const names = scans.flatMap((scan) => scan?.foodItems?.map((item) => item.name) ?? []);
-  const images = await resolveFoodImageRefs(names);
-  return scans.map((scan) => mapScanForResponse(scan, images));
+function mapScanForResponse(scan: ScanDocument) {
+  if (!scan) return null;
+  const serialized = serializeScan(scan);
+  return {
+    ...serialized,
+    foodItems: mapFoodItemsForResponse(scan.foodItems),
+  };
 }
 
-async function mapOneScanForResponse(scan: ScanDocument) {
-  const [mapped] = await mapScansForResponse([scan]);
-  return mapped ?? null;
+function mapScansForResponse(scans: ScanDocument[]) {
+  return scans.map((scan) => mapScanForResponse(scan));
+}
+
+function mapOneScanForResponse(scan: ScanDocument) {
+  return mapScanForResponse(scan);
 }
 
 /** Adds thumbnails to the primary, alternates, and items of a vision analysis. */
-async function attachAnalysisImages<
+function attachAnalysisImages<
   T extends {
     primary: FoodItemWithNutrition | null;
     alternates: FoodItemWithNutrition[];
     foodItems: FoodItemWithNutrition[];
   },
->(analysis: T): Promise<T> {
-  const items = [
-    ...(analysis.primary ? [analysis.primary] : []),
-    ...analysis.alternates,
-    ...analysis.foodItems,
-  ];
-  const images = await resolveFoodImageRefs(items.map((item) => item.name));
-
+>(analysis: T): T {
   const withImage = <I extends FoodItemWithNutrition>(item: I): I => {
-    const imageUrl = images.get(item.name?.trim());
+    const imageUrl = resolveFoodImageUrl(item.name);
     return imageUrl ? { ...item, imageUrl } : item;
   };
 
@@ -125,9 +109,9 @@ router.post('/', async (req: Request, res: Response) => {
   }
 
   try {
-    const withImages = await attachFoodImages(foodItems || []);
+    const withImages = attachFoodImages(foodItems || []);
     const saved = await createFoodScan(userId, withImages);
-    return res.status(201).json(await mapOneScanForResponse(saved));
+    return res.status(201).json(mapOneScanForResponse(saved));
   } catch (error: unknown) {
     const err = error as Error;
     return res.status(500).json({ message: 'Error creating food scan', error: err.message });
@@ -179,7 +163,6 @@ router.get('/search', async (req: Request, res: Response) => {
 
     const limit = Math.min(Number(req.query.limit) || 8, 20);
     const results = await searchFoodNutrition(String(query).trim(), limit);
-    const images = await resolveFoodImageRefs(results.map((r) => r.name));
 
     return res.status(200).json({
       query: String(query).trim(),
@@ -187,7 +170,7 @@ router.get('/search', async (req: Request, res: Response) => {
         name: r.name,
         fdcId: r.fdcId,
         nutrients: r.nutrients,
-        imageUrl: images.get(r.name.trim()),
+        imageUrl: resolveFoodImageUrl(r.name) ?? null,
       })),
     });
   } catch (error: unknown) {
@@ -213,9 +196,9 @@ router.post('/confirm', async (req: Request, res: Response) => {
       });
     }
 
-    const [primaryWithImage] = await attachFoodImages([primary]);
+    const [primaryWithImage] = attachFoodImages([primary]);
     const saved = await createFoodScan(userId, [primaryWithImage]);
-    const mapped = await mapOneScanForResponse(saved);
+    const mapped = mapOneScanForResponse(saved);
     return res.status(201).json({
       ...mapped,
       primary: mapFoodItemForResponse(primaryWithImage),
@@ -249,7 +232,7 @@ router.post('/analyze', async (req: Request, res: Response) => {
       });
     }
 
-    const analysis = await attachAnalysisImages(rawAnalysis);
+    const analysis = attachAnalysisImages(rawAnalysis);
     const payload = buildFoodScanApiPayload(analysis);
 
     if (!hasTrustedPrimaryNutrition(analysis)) {
@@ -264,7 +247,7 @@ router.post('/analyze', async (req: Request, res: Response) => {
     }
 
     const saved = await createFoodScan(userId, [analysis.primary!]);
-    const mapped = await mapOneScanForResponse(saved);
+    const mapped = mapOneScanForResponse(saved);
     return res.status(201).json({
       success: true,
       saved: true,
@@ -301,7 +284,7 @@ router.get('/scans/month/:year/:month', async (req: Request, res: Response) => {
 
     return res.json({
       totalScans: scans.length,
-      scans: await mapScansForResponse(scans),
+      scans: mapScansForResponse(scans),
     });
   } catch (error: unknown) {
     const err = error as Error;
@@ -315,7 +298,7 @@ router.get('/scans/week', async (req: Request, res: Response) => {
     const scans = await findScansInRange(startOfWeek(), endOfWeek(), userId);
     return res.json({
       totalScans: scans.length,
-      scans: await mapScansForResponse(scans),
+      scans: mapScansForResponse(scans),
     });
   } catch (error: unknown) {
     const err = error as Error;
@@ -330,7 +313,7 @@ router.get('/scans/today', async (req: Request, res: Response) => {
     const scans = await findScansInRange(startOfDay(today), endOfDay(today), userId);
     return res.json({
       totalScans: scans.length,
-      scans: await mapScansForResponse(scans),
+      scans: mapScansForResponse(scans),
     });
   } catch (error: unknown) {
     const err = error as Error;
@@ -347,7 +330,7 @@ router.get('/scans/date/:date', async (req: Request, res: Response) => {
 
     const userId = resolveUserIdFilter(req);
     const scans = await findScansInRange(startOfDay(day), endOfDay(day), userId);
-    return res.json({ scans: await mapScansForResponse(scans) });
+    return res.json({ scans: mapScansForResponse(scans) });
   } catch (error: unknown) {
     const err = error as Error;
     return res.status(500).json({ message: 'Failed to fetch scans for date', error: err.message });
@@ -368,14 +351,9 @@ router.get('/scans/last-three-days', async (req: Request, res: Response) => {
       });
     }
 
-    // One image lookup covering all three days rather than one per day.
-    const images = await resolveFoodImageRefs(
-      days.flatMap((day) => day.scans.flatMap((scan) => scan?.foodItems?.map((i) => i.name) ?? []))
-    );
-
     const data = days.map((day) => ({
       date: day.date,
-      scans: day.scans.map((scan) => mapScanForResponse(scan, images)),
+      scans: mapScansForResponse(day.scans),
     }));
 
     return res.json({ data });
@@ -389,7 +367,7 @@ router.get('/scans/last-three-days', async (req: Request, res: Response) => {
 router.get('/:userId', async (req: Request, res: Response) => {
   try {
     const scans = await getFoodScansByUserId(routeParam(req.params.userId));
-    return res.json(await mapScansForResponse(scans));
+    return res.json(mapScansForResponse(scans));
   } catch (error: unknown) {
     const err = error as Error;
     return res.status(500).json({ message: 'Error fetching food scans', error: err.message });
@@ -410,7 +388,7 @@ router.get('/:userId/:id', async (req: Request, res: Response) => {
       return res.status(404).json({ message: 'Food scan not found' });
     }
 
-    return res.json(await mapOneScanForResponse(scan));
+    return res.json(mapOneScanForResponse(scan));
   } catch (error: unknown) {
     const err = error as Error;
     return res.status(500).json({ message: 'Error fetching food scan', error: err.message });

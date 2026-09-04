@@ -1,7 +1,7 @@
 import express, { Request, Response } from 'express';
 import { addCaloriesToDailyIntake } from '../models/caloriePreferences.ts';
 import { createFoodLog, getFoodLogsByUserId, serializeLog } from '../models/foodLog.ts';
-import { resolveFoodImageRef, resolveFoodImageRefs } from '../services/foodImageService.ts';
+import { resolveFoodImageUrl } from '../services/foodImageResolver.ts';
 import { sanitizeImageUrl } from '../utils/foodImageUrl.ts';
 import { routeParam } from '../utils/routeParams.ts';
 
@@ -42,7 +42,7 @@ router.post('/log', async (req: Request, res: Response) => {
     const serialized = serializeLog(foodLogEntry as typeof foodLogEntry & { _id?: unknown });
     return res.status(201).send({
       ...serialized,
-      imageUrl: serialized.imageUrl ?? (await resolveFoodImageRef(label)),
+      imageUrl: serialized.imageUrl ?? resolveFoodImageUrl(label) ?? null,
     });
   } catch (error: unknown) {
     const err = error as Error;
@@ -59,14 +59,12 @@ router.get('/log/:userId', async (req: Request, res: Response) => {
       serializeLog(entry as typeof entry & { _id?: unknown })
     );
 
-    // Thumbnails are derived from the label on read, in one batched lookup for the
-    // whole list, so entries logged before food images existed get one too.
-    const images = await resolveFoodImageRefs(serialized.map((entry) => entry.label));
-
+    // Thumbnails are derived from the label on read, so entries logged before food
+    // images existed get one too.
     return res.send(
       serialized.map((entry) => ({
         ...entry,
-        imageUrl: entry.imageUrl ?? images.get(entry.label?.trim()),
+        imageUrl: entry.imageUrl ?? resolveFoodImageUrl(entry.label) ?? null,
       }))
     );
   } catch (error: unknown) {

@@ -1,14 +1,21 @@
 /**
- * Resolves a thumbnail for a food name.
+ * Legacy remote thumbnail lookup: curated Wikimedia URLs, Edamam, then a Wikimedia
+ * lead-image search, cached in Mongo.
  *
- * Nutrition providers (FitVete, USDA) return no imagery at all, so images are
- * derived from the food name in two tiers:
+ * NO LONGER ON THE SEARCH PATH. Food thumbnails now come from the self-hosted
+ * catalog in services/foodImageResolver.ts, which is synchronous, offline and
+ * deterministic. Asking Wikipedia "what does this food look like?" per request
+ * could not be made reliable — "chicken, back" finds a human back and "liver" an
+ * anatomy diagram, and no amount of blocklisting fixes the underlying ambiguity.
  *
- *   1. Curated category map — instant, offline, covers the common searches.
- *   2. Wikimedia lead-image lookup — batched and cached, covers the long tail.
+ * What is still live here:
+ *   - openFoodImageStream / decodeFoodImageSrc, backing GET /foodScan/image, which
+ *     serves image URLs persisted by older clients.
+ *   - buildFoodImageProxyPath, for any remaining external image URL.
  *
- * Resolution is strictly best-effort: every failure path degrades to "no image"
- * so that a slow or broken image source can never fail a food search.
+ * The lookup tiers below are kept so previously stored external images keep
+ * resolving, and because scripts/generateFoodImageMap.mjs still uses this shape to
+ * populate the curated catalog offline. Nothing calls them per request.
  */
 import { Readable } from 'node:stream';
 import {
@@ -16,9 +23,11 @@ import {
   CURATED_FOOD_KEYS_BY_SPECIFICITY,
 } from './foodImageCatalog.ts';
 import { readCachedFoodImages, writeCachedFoodImages } from '../models/foodImageCache.ts';
+import { isEdamamEnabled, resolveEdamamImages } from './foodImageProviders/edamam.ts';
+import { buildSearchCandidates, normalizeFoodName } from './foodImageNames.ts';
 import { sanitizeImageUrl } from '../utils/foodImageUrl.ts';
 
-export { sanitizeImageUrl };
+export { buildSearchCandidates, normalizeFoodName, sanitizeImageUrl };
 
 const WIKIPEDIA_API = 'https://en.wikipedia.org/w/api.php';
 const THUMB_SIZE = 320;
@@ -49,166 +58,16 @@ function getLookupTimeoutMs(): number {
 }
 
 /**
- * USDA-style qualifiers that describe preparation rather than the food itself.
- * Dropping them turns "pasta, dry, enriched" into "pasta".
- */
-const QUALIFIER_WORDS = new Set([
-  'nfs', 'ns', 'nfd', 'nsk', 'unspecified', 'unprepared', 'prepared',
-  'cooked', 'uncooked', 'raw', 'dry', 'dried', 'fresh', 'frozen', 'canned',
-  'boiled', 'baked', 'roasted', 'steamed', 'microwaved', 'reheated',
-  'enriched', 'unenriched', 'fortified', 'unfortified',
-  'without', 'added', 'salt', 'sugar', 'fat', 'oil',
-  'drained', 'undrained', 'rinsed', 'peeled', 'unpeeled', 'sliced', 'chopped',
-  'whole', 'half', 'part', 'skim', 'lowfat', 'nonfat', 'fatfree', 'reduced',
-  'regular', 'plain', 'unsweetened', 'sweetened', 'seasoned', 'unseasoned',
-  'homemade', 'restaurant', 'fastfood', 'commercial', 'store', 'brand',
-  'includes', 'varieties', 'types', 'form', 'method', 'ready', 'eat', 'serve',
-]);
-
-function stripQualifierWords(segment: string): string {
-  const kept = segment
-    .split(' ')
-    .filter((word) => word && !QUALIFIER_WORDS.has(word));
-  return kept.join(' ').trim();
-}
-
-/**
  * Bumped whenever candidate generation changes. Cached entries record what a
  * lookup found, including misses, so without a version a smarter algorithm would
  * keep serving the old answer until the TTL expired.
  */
-const LOOKUP_VERSION = 'v8';
+const LOOKUP_VERSION = 'v10';
 
 /** Cache/memo key for a food name, scoped to the candidate algorithm version. */
 function cacheKey(raw: string): string {
   const normalized = normalizeFoodName(raw);
   return normalized ? `${LOOKUP_VERSION}:${normalized}` : '';
-}
-
-/** Normalized form: lowercase, punctuation-free, whitespace-collapsed. */
-export function normalizeFoodName(raw: string): string {
-  return raw
-    .toLowerCase()
-    .replace(/\([^)]*\)/g, ' ')
-    .replace(/[^a-z0-9\s,]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-/**
- * Words that describe a food rather than name one, so they must never be searched
- * alone: "rice, white" would otherwise look up the colour White.
- */
-const NON_DISH_MODIFIERS = new Set([
-  'white', 'brown', 'green', 'yellow', 'black', 'blue', 'dark', 'light', 'pale', 'golden',
-  'large', 'small', 'medium', 'mini', 'jumbo', 'thick', 'thin', 'long', 'short',
-  'grain', 'long grain', 'short grain', 'whole grain', 'ground',
-  'mixed', 'assorted', 'other', 'misc', 'miscellaneous', 'generic', 'instant',
-  'all', 'class', 'classes', 'various', 'total', 'composite',
-  // Cooking methods and coatings. These stay usable in combinations, where they
-  // name real dishes ("fried chicken"), but alone they drift: "breaded" resolves
-  // to Bread crumbs and "fried" to Frying.
-  'fried', 'breaded', 'battered', 'crumbed', 'grilled', 'smoked', 'stewed', 'stewing',
-  'roasting', 'broiled', 'poached', 'braised', 'sauteed', 'glazed', 'marinated',
-  'pickled', 'candied', 'creamed', 'mashed', 'shredded', 'minced', 'meatless',
-  'sweet', 'sour', 'salty', 'spicy', 'mild', 'soft', 'hard', 'crisp', 'creamy',
-  'reduced', 'free', 'extra', 'double', 'single', 'style', 'type', 'variety', 'flavored',
-]);
-
-/** A segment that only describes preparation is no help in naming a dish. */
-function isQualifierSegment(segment: string): boolean {
-  const words = segment.split(' ').filter(Boolean);
-  return words.length > 0 && words.every((word) => QUALIFIER_WORDS.has(word));
-}
-
-/**
- * Whether a segment can be searched on its own. A single describing word is enough
- * to make it something other than a dish: "chinese restaurant" finds a photo of a
- * restaurant interior, not of food.
- */
-function isSearchableAlone(segment: string): boolean {
-  if (segment.length < 4) return false;
-
-  const words = segment.split(' ').filter(Boolean);
-  return words.every((word) => !QUALIFIER_WORDS.has(word) && !NON_DISH_MODIFIERS.has(word));
-}
-
-/** "pasta with sauce" / "chicken and rice" -> "pasta" / "chicken" */
-function headOf(value: string): string {
-  return value.split(/\s+(?:with|without|and|in|on|from)\s+/)[0];
-}
-
-/**
- * Turns one food name into search terms ordered most-promising first.
- *
- * Nutrition providers list foods category-first ("soup, tomato"), which is not how
- * dishes are named in English and matches nothing. Reversing the segments recovers
- * the real name ("tomato soup"), which is what makes per-dish images possible.
- */
-export function buildSearchCandidates(raw: string): string[] {
-  const normalized = normalizeFoodName(raw);
-  if (!normalized) return [];
-
-  const segments = normalized
-    .split(',')
-    .map((segment) => segment.trim())
-    .filter(Boolean);
-  if (!segments.length) return [];
-
-  const candidates: string[] = [];
-  const add = (value: string) => {
-    const cleaned = value.replace(/\s+/g, ' ').trim();
-    if (cleaned && cleaned.length > 1 && !candidates.includes(cleaned)) {
-      candidates.push(cleaned);
-    }
-  };
-
-  const base = segments[0];
-
-  // Some entries are recipe descriptions rather than names ("seven-layer salad,
-  // lettuce salad made with a combination of onion, celery, ..."). Their later
-  // segments are ingredients, so searching them finds the ingredient (mayonnaise)
-  // instead of the dish; the leading name is all that is meaningful.
-  const isIngredientList =
-    /\band or\b|\bmade with\b|\bcombination of\b/.test(normalized) ||
-    segments.length > 5 ||
-    normalized.length > 70;
-
-  const detail = isIngredientList
-    ? []
-    : segments.slice(1).filter((segment) => !isQualifierSegment(segment));
-
-  if (detail.length) {
-    add(`${detail[detail.length - 1]} ${base}`);
-    add(`${base} ${detail[0]}`);
-    add(`${detail[0]} ${base}`);
-
-    // A dish often stands alone under its own name: "soup, pozole" -> Pozole.
-    for (let i = detail.length - 1; i >= 0; i -= 1) {
-      if (isSearchableAlone(detail[i])) add(detail[i]);
-    }
-  }
-
-  // "macaroni or pasta salad with egg" — the dish usually sits in the last
-  // alternative, the earlier ones being a broader synonym.
-  if (base.includes(' or ')) {
-    for (const alternative of base.split(' or ').reverse()) {
-      add(alternative);
-      add(headOf(alternative));
-    }
-  }
-
-  // Progressively drop trailing comma segments: most detail first, base food last.
-  for (let count = segments.length; count >= 1; count -= 1) {
-    add(segments.slice(0, count).join(' '));
-  }
-
-  add(base);
-  add(stripQualifierWords(base));
-  add(headOf(base));
-  add(stripQualifierWords(headOf(base)));
-
-  return candidates;
 }
 
 /**
@@ -606,10 +465,47 @@ export async function resolveFoodImageEntries(
 
   if (!stillPending.length) return resolved;
 
-  // Tier 3 — batched Wikimedia lookup. Query every candidate for every
+  const toCache: Array<{ key: string; imageUrl?: string; source: string }> = [];
+  let wikimediaPending = stillPending;
+
+  // Tier 3 — Edamam Food Database (food-specific thumbnails).
+  if (isEdamamEnabled()) {
+    const edamamEntries = stillPending.map((name) => ({
+      name,
+      candidates: plans.get(name)?.lookupCandidates ?? buildSearchCandidates(name),
+    }));
+
+    const { results: edamamHits, ok: edamamOk } = await resolveEdamamImages(edamamEntries);
+
+    for (const name of stillPending) {
+      const imageUrl = edamamHits.get(name);
+      if (!imageUrl) continue;
+
+      if (edamamOk) {
+        const key = cacheKey(name);
+        writeMemo(key, imageUrl);
+        toCache.push({ key, imageUrl, source: 'edamam' });
+      }
+
+      resolved.set(name, { imageUrl });
+    }
+
+    wikimediaPending = stillPending.filter((name) => !edamamHits.has(name));
+  }
+
+  if (!wikimediaPending.length) {
+    try {
+      await writeCachedFoodImages(toCache);
+    } catch (error) {
+      console.log('[food-image] cache write skipped:', (error as Error).message);
+    }
+    return resolved;
+  }
+
+  // Tier 4 — batched Wikimedia lookup. Query every candidate for every
   // outstanding name in one go, then pick each name's most specific hit.
   const titles = new Set<string>();
-  for (const name of stillPending) {
+  for (const name of wikimediaPending) {
     for (const candidate of plans.get(name)?.lookupCandidates ?? []) {
       titles.add(toWikipediaTitle(candidate));
     }
@@ -634,9 +530,9 @@ export async function resolveFoodImageEntries(
     return foodArticles ? foodArticles.has(hit.article) : true;
   };
 
-  const toCache: Array<{ key: string; imageUrl?: string; source: string }> = [];
+  const toCacheWikimedia: Array<{ key: string; imageUrl?: string; source: string }> = [];
 
-  for (const name of stillPending) {
+  for (const name of wikimediaPending) {
     const plan = plans.get(name);
     let imageUrl: string | undefined;
 
@@ -655,7 +551,7 @@ export async function resolveFoodImageEntries(
       // Only the lookup outcome is cached; the curated fallback is applied on read
       // so catalog edits take effect without waiting for the cache to expire.
       writeMemo(key, imageUrl);
-      toCache.push({ key, imageUrl, source: imageUrl ? 'wikipedia' : 'none' });
+      toCacheWikimedia.push({ key, imageUrl, source: imageUrl ? 'wikipedia' : 'none' });
     }
 
     if (imageUrl) resolved.set(name, { imageUrl });
@@ -669,7 +565,7 @@ export async function resolveFoodImageEntries(
   }
 
   try {
-    await writeCachedFoodImages(toCache);
+    await writeCachedFoodImages([...toCache, ...toCacheWikimedia]);
   } catch (error) {
     console.log('[food-image] cache write skipped:', (error as Error).message);
   }
@@ -692,7 +588,17 @@ export const FOOD_IMAGE_PROXY_PATH = '/foodScan/image';
 
 /** Hosts the proxy will fetch from. Anything else is rejected, so `src` cannot be
  * turned into an open proxy. */
-const ALLOWED_IMAGE_HOSTS = new Set(['upload.wikimedia.org']);
+const ALLOWED_IMAGE_HOSTS = new Set([
+  'upload.wikimedia.org',
+  'www.edamam.com',
+  'edamam-product-images.s3.amazonaws.com',
+]);
+
+function isAllowedImageHost(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  if (ALLOWED_IMAGE_HOSTS.has(host)) return true;
+  return host === 'edamam.com' || host.endsWith('.edamam.com');
+}
 
 /**
  * Proxy URLs are content-addressed by their upstream URL rather than by food name,
@@ -716,7 +622,7 @@ export function decodeFoodImageSrc(src: string): string | undefined {
   try {
     const parsed = new URL(decoded);
     if (parsed.protocol !== 'https:') return undefined;
-    if (!ALLOWED_IMAGE_HOSTS.has(parsed.hostname)) return undefined;
+    if (!isAllowedImageHost(parsed.hostname)) return undefined;
     return parsed.toString();
   } catch {
     return undefined;
